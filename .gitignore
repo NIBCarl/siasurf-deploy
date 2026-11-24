@@ -1,0 +1,223 @@
+# ==============================================================================
+# Environment & Sensitive Files
+# ==============================================================================
+.env
+.env.backup
+.env.production
+.env.staging
+.env.development
+.env.local
+.env.*
+!.env.example
+!.env.production.example
+!.env.testing
+
+# ==============================================================================
+# Dependencies (Composer & Node)
+# ==============================================================================
+/node_modules/
+node_modules/
+/vendor/
+vendor/
+composer.phar
+auth.json
+
+# ==============================================================================
+# Laravel Framework & Application Storage
+# ==============================================================================
+/public/build/
+/public/hot
+/public/storage
+/storage/*.key
+/storage/oauth-*.key
+/storage/oauth-*.pub
+/bootstrap/cache/*.php
+!/bootstrap/cache/.gitignore
+
+# ==============================================================================
+# Databases (SQLite & Journals)
+# ==============================================================================
+/database/*.sqlite
+/database/*.sqlite-journal
+/database/*.sqlite-shm
+/database/*.sqlite-wal
+*.sqlite
+*.sqlite-journal
+*.sqlite-shm
+*.sqlite-wal
+
+# ==============================================================================
+# Testing & Code Quality Caches
+# ==============================================================================
+.phpunit.result.cache
+.phpunit.cache/
+.pest/
+.php-cs-fixer.cache
+.php_cs.cache
+.mypy_cache/
+.pytest_cache/
+coverage/
+htmlcov/
+.coverage
+.coverage.*
+
+# ==============================================================================
+# Test Dumps, Debug Outputs & Scratch Files
+# ==============================================================================
+test*.txt
+test-*.txt
+test_*.txt
+booking_test.txt
+final_test.txt
+err*.txt
+q[0-9]*.txt
+_dump_*.php
+_prep_*.php
+_capture_*.cjs
+_temp_*
+_scratch_*
+
+# ==============================================================================
+# Logs & Temporary Files
+# ==============================================================================
+*.log
+*.tmp
+*.temp
+*.bak
+*.swp
+*.swo
+*~
+Homestead.json
+Homestead.yaml
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.pnpm-store/
+.vite/
+.turbo/
+.parcel-cache/
+
+# ==============================================================================
+# Python Virtual Environments & Bytecode
+# ==============================================================================
+venv/
+.venv/
+env/
+ENV/
+*.pyc
+__pycache__/
+
+# ==============================================================================
+# Compiled & Build Artifacts
+# ==============================================================================
+*.o
+*.obj
+*.class
+*.exe
+*.dll
+*.so
+*.a
+*.out
+dist/
+build/
+target/
+.gradle/
+
+# ==============================================================================
+# Archives & Compressed Files
+# ==============================================================================
+*.zip
+*.gz
+*.tar
+*.tgz
+*.bz2
+*.xz
+*.7z
+*.rar
+*.zst
+*.lz4
+*.lzh
+*.cab
+*.arj
+*.rpm
+*.deb
+*.Z
+*.lz
+*.lzo
+*.tar.gz
+*.tar.bz2
+*.tar.xz
+*.tar.zst
+
+# ==============================================================================
+# Editors & IDEs
+# ==============================================================================
+.vscode/
+.idea/
+*.iws
+*.iml
+*.ipr
+.fleet/
+.zed/
+.history/
+*.sublime-project
+*.sublime-workspace
+
+# ==============================================================================
+# AI Assistants, Agent Workspaces & Tools
+# ==============================================================================
+.agents/
+.claude/
+.cursor/
+.windsurf/
+.copilot/
+.gemini/
+.git_disabled/
+.refact/buddy/
+.refact/*.lock
+.refact/*.jsonl
+.opencode/node_modules/
+.opencode/dist/
+.opencode/cache/
+
+# ==============================================================================
+# Operating System Files
+# ==============================================================================
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+desktop.ini
+
+# ==============================================================================
+# Impeccable
+# ==============================================================================
+# impeccable-ignore-start
+# Ephemeral output, runtime state, and per-dev overrides.
+.impeccable/config.local.json
+.impeccable/hook.cache.json
+.impeccable/hook.pending.json
+.impeccable/*.png
+.impeccable/live/server.json
+.impeccable/live/sessions/
+.impeccable/live/previews/
+.impeccable/live/annotations/
+.impeccable/live/cache/
+.impeccable/live/manual-edit-apply-transaction.json
+.impeccable/live/manual-edit-events.jsonl
+.impeccable/live/manual-edit-evidence/
+.impeccable/live/pending-manual-edits.json
+.impeccable/live/deferred-svelte-component-accepts.json
+.impeccable/live/*.png
+# impeccable-ignore-end
+# ==============================================================================
+# Specifications & Word Manuscripts
+# ==============================================================================
+siasurf-system-specification.xml
+screenshots/
+*.docx

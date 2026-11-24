@@ -1,0 +1,75 @@
+<?php
+
+namespace App\Notifications;
+
+use App\Models\Booking;
+use Illuminate\Bus\Queueable;
+use Illuminate\Contracts\Queue\ShouldQueue;
+use Illuminate\Notifications\Messages\MailMessage;
+use Illuminate\Notifications\Notification;
+
+class SendReviewRequest extends Notification implements ShouldQueue
+{
+    use Queueable;
+
+    protected Booking $booking;
+
+    /**
+     * Create a new notification instance.
+     */
+    public function __construct(Booking $booking)
+    {
+        $this->booking = $booking;
+    }
+
+    /**
+     * Get the notification's delivery channels.
+     *
+     * @return array<int, string>
+     */
+    public function via(object $notifiable): array
+    {
+        return ['database', 'mail'];
+    }
+
+    /**
+     * Get the mail representation of the notification.
+     */
+    public function toMail(object $notifiable): MailMessage
+    {
+        $instructorName = $this->booking->instructor->name;
+        $reviewUrl = route('student.feedback.create', $this->booking->id);
+
+        return (new MailMessage)
+            ->subject('How was your surfing lesson with ' . $instructorName . '?')
+            ->greeting('Hello ' . $notifiable->name . '!')
+            ->line('We hope you had an amazing time surfing with ' . $instructorName . ' earlier today.')
+            ->line('Your feedback helps other students find great instructors and helps us improve our service.')
+            ->action('Leave Feedback', $reviewUrl)
+            ->line('It only takes a minute, and your honest opinion means a lot to our community.')
+            ->line('Thank you for choosing SiaSurf!')
+            ->salutation('Best regards,\nThe SiaSurf Team');
+    }
+
+    /**
+     * Get the array representation of the notification.
+     *
+     * @return array<string, mixed>
+     */
+    public function toArray(object $notifiable): array
+    {
+        $instructorName = $this->booking->instructor?->name ?? 'your instructor';
+
+        return [
+            'booking_id' => $this->booking->id,
+            'instructor_id' => $this->booking->instructor_id,
+            'instructor_name' => $instructorName,
+            'type' => 'review_request',
+            'message' => "How was your surf lesson with {$instructorName}? Share your feedback.",
+            'url' => route('student.feedback.create', $this->booking->id),
+        ];
+    }
+}
+
+
+

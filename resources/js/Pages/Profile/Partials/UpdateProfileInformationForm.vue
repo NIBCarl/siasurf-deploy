@@ -1,0 +1,208 @@
+<script setup lang="ts">
+import InputError from '@/Components/InputError.vue';
+import InputLabel from '@/Components/InputLabel.vue';
+import PrimaryButton from '@/Components/PrimaryButton.vue';
+import TextInput from '@/Components/TextInput.vue';
+import { Link, useForm, usePage } from '@inertiajs/vue3';
+import { computed } from 'vue';
+import { calculatePhilippineAge, getPhilippineMaxBirthday } from '@/utils/philippineTime';
+
+defineProps<{
+    mustVerifyEmail?: Boolean;
+    status?: String;
+}>();
+
+const user = usePage().props.auth.user;
+
+const maxBirthday = getPhilippineMaxBirthday(5);
+
+const commonCountries = [
+    'Philippines',
+    'Australia',
+    'United States',
+    'United Kingdom',
+    'Canada',
+    'France',
+    'Germany',
+    'Spain',
+    'Netherlands',
+    'Italy',
+    'Switzerland',
+    'Sweden',
+    'Japan',
+    'South Korea',
+    'Singapore',
+    'New Zealand',
+    'Israel',
+    'Brazil',
+];
+
+const form = useForm({
+    name: user.name,
+    email: user.email,
+    phone: user.phone ?? '',
+    birthday: user.student_profile?.birthday ?? '',
+    country: user.student_profile?.country ?? '',
+});
+
+const computedAge = computed(() => calculatePhilippineAge(form.birthday));
+</script>
+
+<template>
+    <section>
+        <header>
+            <h2 class="text-lg font-medium text-slate-900">
+                Profile Information
+            </h2>
+
+            <p class="mt-1 text-sm text-slate-600">
+                Update your account's profile information and email address.
+            </p>
+        </header>
+
+        <form
+            @submit.prevent="form.patch(route('profile.update'))"
+            class="mt-6 space-y-6"
+        >
+            <div>
+                <InputLabel for="name" value="Name" />
+
+                <TextInput
+                    id="name"
+                    type="text"
+                    class="mt-1 block w-full"
+                    v-model="form.name"
+                    required
+                    autofocus
+                    autocomplete="name"
+                />
+
+                <InputError class="mt-2" :message="form.errors.name" />
+            </div>
+
+            <div>
+                <InputLabel for="email" value="Email" />
+
+                <TextInput
+                    id="email"
+                    type="email"
+                    class="mt-1 block w-full"
+                    v-model="form.email"
+                    required
+                    autocomplete="username"
+                />
+
+                <InputError class="mt-2" :message="form.errors.email" />
+            </div>
+
+            <div>
+                <InputLabel for="phone" value="Phone number" />
+
+                <TextInput
+                    id="phone"
+                    type="tel"
+                    class="mt-1 block w-full"
+                    v-model="form.phone"
+                    autocomplete="tel"
+                    placeholder="+63 917 000 0000"
+                />
+
+                <p class="mt-1 text-xs text-slate-500">
+                    Used by your instructor or SISA when a lesson needs to be moved.
+                </p>
+
+                <InputError class="mt-2" :message="form.errors.phone" />
+            </div>
+
+            <template v-if="user.role === 'student'">
+                <div class="grid grid-cols-1 gap-6 sm:grid-cols-2">
+                    <div>
+                        <div class="flex items-center justify-between">
+                            <InputLabel for="birthday" value="Birthday" />
+                            <span v-if="computedAge !== null" class="text-xs font-semibold text-ocean-700">
+                                Age: {{ computedAge }}
+                            </span>
+                        </div>
+
+                        <TextInput
+                            id="birthday"
+                            type="date"
+                            class="mt-1 block w-full"
+                            v-model="form.birthday"
+                            :max="maxBirthday"
+                            min="1920-01-01"
+                        />
+
+                        <p class="mt-1 text-xs text-slate-500">
+                            Used to automatically prefill your birthday and age on surf lesson waivers.
+                        </p>
+
+                        <InputError class="mt-2" :message="form.errors.birthday" />
+                    </div>
+
+                    <div>
+                        <InputLabel for="country" value="Country" />
+
+                        <TextInput
+                            id="country"
+                            type="text"
+                            list="profile-country-options"
+                            class="mt-1 block w-full"
+                            v-model="form.country"
+                            autocomplete="country-name"
+                            placeholder="e.g. Philippines"
+                        />
+                        <datalist id="profile-country-options">
+                            <option v-for="country in commonCountries" :key="country" :value="country" />
+                        </datalist>
+
+                        <p class="mt-1 text-xs text-slate-500">
+                            Prefilled on your surf lesson waiver.
+                        </p>
+
+                        <InputError class="mt-2" :message="form.errors.country" />
+                    </div>
+                </div>
+            </template>
+
+            <div v-if="mustVerifyEmail && user.email_verified_at === null">
+                <p class="mt-2 text-sm text-slate-800">
+                    Your email address is unverified.
+                    <Link
+                        :href="route('verification.send')"
+                        method="post"
+                        as="button"
+                        class="rounded-md text-sm text-slate-600 underline hover:text-slate-900 focus:outline-none focus:ring-2 focus:ring-wave-500 focus:ring-offset-2"
+                    >
+                        Click here to re-send the verification email.
+                    </Link>
+                </p>
+
+                <div
+                    v-show="status === 'verification-link-sent'"
+                    class="mt-2 text-sm font-medium text-emerald-600"
+                >
+                    A new verification link has been sent to your email address.
+                </div>
+            </div>
+
+            <div class="flex flex-col sm:flex-row sm:items-center gap-4">
+                <PrimaryButton class="w-full sm:w-auto" :disabled="form.processing">Save</PrimaryButton>
+
+                <Transition
+                    enter-active-class="transition ease-in-out"
+                    enter-from-class="opacity-0"
+                    leave-active-class="transition ease-in-out"
+                    leave-to-class="opacity-0"
+                >
+                    <p
+                        v-if="form.recentlySuccessful"
+                        class="text-sm text-slate-600"
+                    >
+                        Saved.
+                    </p>
+                </Transition>
+            </div>
+        </form>
+    </section>
+</template>

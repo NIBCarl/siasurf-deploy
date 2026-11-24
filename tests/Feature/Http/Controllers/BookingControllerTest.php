@@ -1,0 +1,416 @@
+<?php
+
+namespace Tests\Feature\Http\Controllers;
+
+use App\Enums\BookingStatus;
+use App\Enums\SkillLevel;
+use App\Enums\PaymentStatus;
+use App\Models\Booking;
+use App\Models\SurfSpot;
+use App\Models\User;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Tests\TestCase;
+
+class BookingControllerTest extends TestCase
+{
+    use RefreshDatabase;
+
+    private User $student;
+    private User $instructor;
+    private SurfSpot $surfSpot;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        
+        \Spatie\Permission\Models\Role::findOrCreate('student', 'web');
+        \Spatie\Permission\Models\Role::findOrCreate('instructor', 'web');
+        \Spatie\Permission\Models\Role::findOrCreate('admin', 'web');
+
+        $this->student = User::factory()->create(['role' => 'student']);
+        $this->student->assignRole('student');
+
+        $this->instructor = User::factory()->create(['role' => 'instructor']);
+        $this->instructor->assignRole('instructor');
+
+        $this->instructor->instructorProfile()->create([
+            'level' => \App\Enums\InstructorLevel::Level2, 
+            'status' => 'active',
+            'rate_per_hour' => 1000
+        ]);
+        $this->surfSpot = SurfSpot::factory()->create(['difficulty' => 'beginner']);
+    }
+
+    /** @test */
+    public function student_can_view_booking_creation_form()
+    {
+        $response = $this->actingAs($this->student)
+            ->get(route('bookings.create', $this->instructor->id));
+
+        $response->assertOk()
+            ->assertInertia(fn ($page) => $page
+                ->component('Booking/Create')
+                ->has('instructor')
+                ->has('surfSpots')
+            );
+    }
+
+    /** @test */
+    public function student_can_create_booking_with_valid_data()
+    {
+        $bookingData = [
+            'date' => now()->addDay()->format('Y-m-d'),
+            'start_time' => '09:00',
+            'skill_level' => 'beginner',
+            'student_age' => 25,
+            'height' => 170,
+            'weight' => 65,
+            'student_count' => 1,
+            'has_board' => true,
+            'surf_spot_id' => $this->surfSpot->id,
+        ];
+
+        $response = $this->actingAs($this->student)
+            ->followingRedirects()
+            ->post(route('bookings.store-details', $this->instructor->id), $bookingData);
+
+        $response->assertOk()
+            ->assertInertia(fn ($page) => $page
+                ->component('Booking/Waiver')
+            );
+    }
+
+    /** @test */
+    public function a_standard_booking_is_two_hours_and_priced_on_that_duration()
+    {
+        $response = $this->actingAs($this->student)
+            ->post(route('bookings.store-details', $this->instructor->id), [
+                'date' => now()->addDays(2)->format('Y-m-d'),
+                'start_time' => '09:00',
+                'skill_level' => 'beginner',
+                'student_age' => 25,
+                'height' => 170,
+                'weight' => 65,
+                'student_count' => 1,
+                'has_board' => true,
+                'surf_spot_id' => $this->surfSpot->id,
+            ]);
+
+        $response->assertRedirect();
+
+        $booking = Booking::latest('id')->firstOrFail();
+
+        // Methodology: standard session is 2 hours (default 2 hours).
+        $this->assertSame(2, $booking->duration_hours);
+        $this->assertSame('11:00', $booking->end_time->format('H:i'));
+
+        // Lesson price is rate (₱1,000) x 2 hours x 1 student, plus 7% SISA service fee (₱140).
+        $this->assertEquals(2000.0, (float) $booking->lesson_price);
+        $this->assertEquals(140.0, (float) $booking->service_fee_amount);
+        $this->assertEquals(2140.0, (float) $booking->total_amount);
+
+        // The 15-minute checkout hold clock starts at creation so an abandoned
+        // pre-payment booking can be swept and its slot released; the 2-hour
+        // instructor acceptance clock starts only after payment selection.
+        $this->assertNotNull($booking->payment_deadline_at);
+        $this->assertNull($booking->accept_deadline_at);
+    }
+
+    /** @test */
+    public function booking_fails_validation_for_multi_student_payload_and_level1_blocks_second_student()
+    {
+        $level1Instructor = User::factory()->create(['role' => 'instructor']);
+        $level1Instructor->assignRole('instructor');
+        $level1Instructor->instructorProfile()->create([
+            'level' => 1,
+            'status' => 'active',
+            'rate_per_hour' => 800,
+        ]);
+
+        $bookingData = [
+            'date' => now()->addDay()->format('Y-m-d'),
+            'start_time' => '09:00',
+            'skill_level' => 'beginner',
+            'student_age' => 25,
+            'height' => 170,
+            'weight' => 65,
+            'student_count' => 3, // Multi-student booking rejected (1 account = 1 seat)
+            'has_board' => true,
+            'surf_spot_id' => $this->surfSpot->id,
+            'participants' => [
+                ['full_name' => 'Primary Surfer', 'age' => 25, 'skill_level' => 'beginner', 'has_board' => true],
+                ['full_name' => 'Companion One', 'age' => 25, 'skill_level' => 'beginner', 'has_board' => true],
+                ['full_name' => 'Companion Two', 'age' => 25, 'skill_level' => 'beginner', 'has_board' => true],
+            ],
+        ];
+
+        $this->actingAs($this->student)
+            ->post(route('bookings.store-details', $level1Instructor->id), $bookingData)
+            ->assertSessionHasErrors(['student_count', 'participants']);
+
+        $this->assertDatabaseCount('bookings', 0);
+
+        // First beginner books the 1-on-1 Level 1 slot.
+        $this->actingAs($this->student)
+            ->post(route('bookings.store-details', $level1Instructor->id), [
+                'date' => now()->addDay()->format('Y-m-d'),
+                'start_time' => '09:00',
+                'skill_level' => 'beginner',
+                'student_age' => 25,
+                'height' => 170,
+                'weight' => 65,
+                'student_count' => 1,
+                'has_board' => true,
+                'surf_spot_id' => $this->surfSpot->id,
+            ])
+            ->assertRedirect();
+
+        // A second student account cannot share a Level 1 slot.
+        $otherStudent = User::factory()->create(['role' => 'student']);
+        $otherStudent->assignRole('student');
+        $otherStudent->studentProfile()->create(['skill_level' => 'beginner', 'status' => 'active']);
+
+        $this->actingAs($otherStudent)
+            ->post(route('bookings.store-details', $level1Instructor->id), [
+                'date' => now()->addDay()->format('Y-m-d'),
+                'start_time' => '09:00',
+                'skill_level' => 'beginner',
+                'student_age' => 24,
+                'height' => 168,
+                'weight' => 60,
+                'student_count' => 1,
+                'has_board' => true,
+                'surf_spot_id' => $this->surfSpot->id,
+            ])
+            ->assertSessionHas('error');
+
+        $this->assertDatabaseCount('bookings', 1);
+    }
+
+    /** @test */
+    public function instructor_can_confirm_booking()
+    {
+        $booking = Booking::factory()->create([
+            'student_id' => $this->student->id,
+            'instructor_id' => $this->instructor->id,
+            'status' => BookingStatus::Pending,
+        ]);
+
+        $response = $this->actingAs($this->instructor)
+            ->patch(route('instructor.bookings.confirm', $booking->id));
+
+        $response->assertRedirect();
+        
+        $this->assertDatabaseHas('bookings', [
+            'id' => $booking->id,
+            'status' => BookingStatus::Confirmed->value,
+        ]);
+    }
+
+    /** @test */
+    public function student_cannot_confirm_booking()
+    {
+        $booking = Booking::factory()->create([
+            'student_id' => $this->student->id,
+            'instructor_id' => $this->instructor->id,
+            'status' => BookingStatus::Pending,
+        ]);
+
+        $response = $this->actingAs($this->student)
+            ->patch(route('instructor.bookings.confirm', $booking->id));
+
+        $response->assertForbidden();
+    }
+
+    /** @test */
+    public function student_can_cancel_pending_booking()
+    {
+        $booking = Booking::factory()->create([
+            'student_id' => $this->student->id,
+            'instructor_id' => $this->instructor->id,
+            'status' => BookingStatus::Pending,
+        ]);
+
+        $response = $this->actingAs($this->student)
+            ->post(route('student.bookings.cancel', $booking->id), [
+                'reason' => 'Changed my mind',
+            ]);
+
+        $response->assertRedirect();
+        
+        $this->assertDatabaseHas('bookings', [
+            'id' => $booking->id,
+            'status' => BookingStatus::Cancelled->value,
+        ]);
+    }
+
+    /** @test */
+    public function student_can_view_their_bookings()
+    {
+        Booking::factory()->count(3)->create([
+            'student_id' => $this->student->id,
+        ]);
+
+        $response = $this->actingAs($this->student)
+            ->get(route('student.bookings.index'));
+
+        $response->assertOk()
+            ->assertInertia(fn ($page) => $page
+                ->component('Student/Bookings/Index')
+                ->has('bookings.data', 3)
+            );
+    }
+
+    /** @test */
+    public function student_cannot_view_others_bookings()
+    {
+        $otherStudent = User::factory()->create(['role' => 'student']);
+        $otherStudent->assignRole('student');
+        $booking = Booking::factory()->create([
+            'student_id' => $otherStudent->id,
+        ]);
+
+        $response = $this->actingAs($this->student)
+            ->get(route('student.bookings.show', $booking->id));
+
+        $response->assertForbidden();
+    }
+
+    /** @test */
+    public function booking_requires_valid_date_in_future()
+    {
+        $response = $this->actingAs($this->student)
+            ->post(route('bookings.store-details', $this->instructor->id), [
+                'date' => now()->subDay()->format('Y-m-d'), // Past date
+                'start_time' => '09:00',
+                'skill_level' => 'beginner',
+                'student_age' => 25,
+                'height' => 170,
+                'weight' => 65,
+                'student_count' => 1,
+                'has_board' => true,
+                'surf_spot_id' => $this->surfSpot->id,
+            ]);
+
+        $response->assertSessionHasErrors(['date']);
+    }
+
+    /** @test */
+    public function booking_requires_surf_spot_id()
+    {
+        $response = $this->actingAs($this->student)
+            ->post(route('bookings.store-details', $this->instructor->id), [
+                'date' => now()->addDay()->format('Y-m-d'),
+                'start_time' => '09:00',
+                'skill_level' => 'beginner',
+                'student_age' => 25,
+                'height' => 170,
+                'weight' => 65,
+                'student_count' => 1,
+                'has_board' => true,
+                // Missing surf_spot_id
+            ]);
+
+        $response->assertSessionHasErrors(['surf_spot_id']);
+    }
+
+    /** @test */
+    public function instructor_confirms_gcash_booking_transitions_to_awaiting_payment()
+    {
+        \Illuminate\Support\Facades\Queue::fake();
+
+        $booking = Booking::factory()->create([
+            'student_id' => $this->student->id,
+            'instructor_id' => $this->instructor->id,
+            'status' => BookingStatus::Pending,
+        ]);
+
+        $payment = \App\Models\Payment::create([
+            'booking_id' => $booking->id,
+            'amount' => $booking->total_amount,
+            'payment_method' => \App\Enums\PaymentMethod::GCash,
+            'status' => PaymentStatus::Pending,
+        ]);
+
+        $response = $this->actingAs($this->instructor)
+            ->patch(route('instructor.bookings.confirm', $booking->id));
+
+        $response->assertRedirect();
+        
+        $this->assertDatabaseHas('bookings', [
+            'id' => $booking->id,
+            'status' => BookingStatus::AwaitingPayment->value,
+        ]);
+
+        $this->assertNotNull($booking->fresh()->payment_deadline_at);
+
+        // Verify availability is blocked
+        $this->assertDatabaseHas('availabilities', [
+            'user_id' => $this->instructor->id,
+            'specific_date' => $booking->date->format('Y-m-d'),
+            'time_period' => $booking->time_period->value,
+            'is_available' => false,
+        ]);
+
+        // Verify expiration job is dispatched
+        \Illuminate\Support\Facades\Queue::assertPushed(\App\Jobs\ExpirePaymentWindowJob::class);
+    }
+
+    /** @test */
+    public function expiration_job_marks_payment_timeout_and_releases_availability()
+    {
+        $booking = Booking::factory()->create([
+            'student_id' => $this->student->id,
+            'instructor_id' => $this->instructor->id,
+            'status' => BookingStatus::AwaitingPayment,
+            'payment_deadline_at' => now()->subMinutes(1),
+        ]);
+
+        // Lock the slot the way the accept flow does, so the job can hand it back.
+        app(\App\Services\AvailabilityService::class)->blockForBooking($booking);
+
+        $bookingDate = $booking->date;
+
+        $this->assertDatabaseHas('availabilities', [
+            'user_id' => $this->instructor->id,
+            'specific_date' => $bookingDate->format('Y-m-d'),
+            'time_period' => $booking->time_period->value,
+            'is_available' => false,
+        ]);
+
+        // Run job
+        $job = new \App\Jobs\ExpirePaymentWindowJob($booking);
+        $job->handle(app(\App\Services\AvailabilityService::class));
+
+        // A payment timeout is its own state, not a deliberate cancellation.
+        $this->assertEquals(BookingStatus::PaymentTimeout, $booking->fresh()->status);
+        $this->assertEquals(
+            \App\Enums\CancellationReason::PaymentTimeout,
+            $booking->fresh()->cancellation_reason
+        );
+
+        // Verify availability is released (blocked record is deleted)
+        $this->assertDatabaseMissing('availabilities', [
+            'user_id' => $this->instructor->id,
+            'specific_date' => $bookingDate->format('Y-m-d'),
+            'time_period' => $booking->time_period->value,
+            'is_available' => false,
+        ]);
+    }
+
+    /** @test */
+    public function expiration_job_leaves_a_paid_booking_alone()
+    {
+        $booking = Booking::factory()->create([
+            'student_id' => $this->student->id,
+            'instructor_id' => $this->instructor->id,
+            'status' => BookingStatus::Confirmed,
+            'payment_deadline_at' => now()->subMinutes(1),
+        ]);
+
+        $job = new \App\Jobs\ExpirePaymentWindowJob($booking);
+        $job->handle(app(\App\Services\AvailabilityService::class));
+
+        $this->assertEquals(BookingStatus::Confirmed, $booking->fresh()->status);
+    }
+}

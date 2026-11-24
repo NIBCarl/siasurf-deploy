@@ -1,0 +1,79 @@
+<?php
+
+namespace App\Enums;
+
+enum PaymentStatus: string
+{
+    case Pending = 'pending';
+    case Completed = 'completed';
+    case Underpaid = 'underpaid';
+    case Failed = 'failed';
+    case RefundRequested = 'refund_requested';
+    case RefundProcessing = 'refund_processing';
+    case Refunded = 'refunded';
+    case PendingCash = 'pending_cash';
+
+    /**
+     * The student uploaded a GCash receipt and it is waiting for the
+     * instructor/SISA to verify it. This is what "payment submitted" means for
+     * the cancel rules: the money may already have left the student's account.
+     */
+    case PendingVerification = 'pending_verification';
+
+    public function label(): string
+    {
+        return match($this) {
+            self::Pending => 'Pending',
+            self::Completed => 'Completed',
+            self::Underpaid => 'Underpaid',
+            self::Failed => 'Failed',
+            self::RefundRequested => 'Refund Requested',
+            self::RefundProcessing => 'Refund Processing',
+            self::Refunded => 'Refunded',
+            self::PendingCash => 'Pending Cash Payment',
+            self::PendingVerification => 'Awaiting Receipt Verification',
+        };
+    }
+
+    public function color(): string
+    {
+        return match($this) {
+            self::Pending => 'yellow',
+            self::Completed => 'green',
+            self::Underpaid => 'red',
+            self::Failed => 'red',
+            self::RefundRequested => 'amber',
+            self::RefundProcessing => 'blue',
+            self::Refunded => 'gray',
+            self::PendingCash => 'orange',
+            self::PendingVerification => 'blue',
+        };
+    }
+
+    /**
+     * Statuses that mean money has been handed over (or claimed) by the
+     * student. Cancelling is blocked from this point on.
+     *
+     * @return array<int, self>
+     */
+    public static function submitted(): array
+    {
+        return [self::PendingVerification, self::Underpaid, self::Completed];
+    }
+
+    /**
+     * Statuses where payment has been settled and the non-refundable
+     * platform service fee has been earned/retained (BR-PRC-03, BR-CXL-05).
+     *
+     * @return array<int, self>
+     */
+    public static function serviceFeeCollected(): array
+    {
+        return [
+            self::Completed,
+            self::RefundRequested,
+            self::RefundProcessing,
+            self::Refunded,
+        ];
+    }
+}
