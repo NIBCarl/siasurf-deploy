@@ -32,6 +32,7 @@ interface PlatformRules {
     standard_hours: number;
     refund_long_term_threshold_days: number;
     refund_long_term_window_days: number;
+    refund_max_days_from_payment: number;
     refund_short_term_full_days: number;
     refund_short_term_half_days: number;
     refund_short_term_half_percent: number;
@@ -222,14 +223,13 @@ const formatPeso = (amount: number): string => `₱${amount.toLocaleString('en-P
                             Refund eligibility applies to the <strong class="text-deep-950">lesson price</strong> only; the {{ rules.service_fee_percent }}% platform service fee is non-refundable once processed:
                         </p>
                         <ul class="mt-3 list-disc space-y-2 pl-5 text-body-sm leading-relaxed text-stone-700">
-                            <li><strong class="text-deep-950">Long-Term Bookings (&gt;{{ rules.refund_long_term_threshold_days }} days before lesson):</strong> 100% of lesson price if cancelled within {{ rules.refund_long_term_window_days }} days of payment; thereafter, standard short-term tiers apply.</li>
-                            <li><strong class="text-deep-950">Short-Term Cancellation Tiers:</strong>
+                            <li><strong class="text-deep-950">Unified Lesson-Countdown Refund Tiers:</strong> eligibility is measured from the scheduled lesson start time, regardless of how far in advance the booking was made.
                                 <span class="font-semibold text-deep-950">{{ rules.refund_short_term_full_days }}+ days</span> before lesson = <strong class="text-deep-950">100%</strong> lesson price;
                                 <span class="font-semibold text-deep-950">{{ rules.refund_short_term_half_days }}–{{ rules.refund_short_term_full_days - 1 }} days</span> before lesson = <strong class="text-deep-950">{{ rules.refund_short_term_half_percent }}%</strong> lesson price;
-                                <span class="font-semibold text-deep-950">&lt;{{ rules.refund_short_term_half_days }} days</span> before lesson = <strong class="text-deep-950">0%</strong> refund.
+                                <span class="font-semibold text-deep-950">&lt;{{ rules.refund_short_term_half_days }} days</span> before lesson or no-show = <strong class="text-deep-950">0%</strong> refund.
                             </li>
                             <li><strong class="text-deep-950">Instructor, Weather &amp; Reschedule-Decline Cancellations:</strong> 100% lesson-price refund when cancelled due to instructor unavailability, unsafe surf/weather conditions, or when a student declines a proposed reschedule.</li>
-                            <li><strong class="text-deep-950">Gateway Window Exception:</strong> Refunds requested more than 30 days after payment route to manual SISA completion outside the automated gateway window.</li>
+                            <li><strong class="text-deep-950">Settlement Timing:</strong> A qualifying refund requested within {{ rules.refund_max_days_from_payment }} days of payment is dispatched automatically through the payment gateway. Later requests are completed manually by a SISA administrator at the same percentage.</li>
                         </ul>
                     </section>
 

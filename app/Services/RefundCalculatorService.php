@@ -135,43 +135,28 @@ class RefundCalculatorService
             );
         }
 
-        // Student-initiated tiered policy on a paid GCash booking.
-        $isLongTerm = $this->isLongTermBooking($booking, $cancelMoment, $tz);
-        $longTermWindow = (int) config('siasurf.refunds.long_term_window_days', 30);
+        // Unified lesson-countdown policy (BR-CXL-11).
+        //
+        // Eligibility is anchored ONLY to the scheduled lesson start, never to
+        // the payment date, so booking early can never punish a tourist and
+        // cancelling late can never be used to game a 100% refund.
+        // `refunds.max_days_from_payment` is intentionally NOT consulted here;
+        // it only decides dispatch mode in resolveDispatchMode().
         $fullDays = (int) config('siasurf.refunds.short_term_full_days', 7);
         $halfDays = (int) config('siasurf.refunds.short_term_half_days', 3);
         $halfPercent = (int) config('siasurf.refunds.short_term_half_percent', 50);
 
-        if ($isLongTerm) {
-            $policyType = 'long_term';
+        $policyType = 'lesson_countdown';
 
-            if ($daysSincePayment <= $longTermWindow) {
-                $percentage = 100;
-                $basis = RefundBasis::LongTermWithin30Days;
-            } elseif ($daysBeforeSession >= $fullDays) {
-                // Past 30-day payment window: fall through to short-term sliding window.
-                $percentage = 100;
-                $basis = RefundBasis::LongTermFallbackFull;
-            } elseif ($daysBeforeSession >= $halfDays) {
-                $percentage = $halfPercent;
-                $basis = RefundBasis::LongTermFallbackHalf;
-            } else {
-                $percentage = 0;
-                $basis = RefundBasis::LongTermFallbackNoRefund;
-            }
+        if ($daysBeforeSession >= $fullDays) {
+            $percentage = 100;
+            $basis = RefundBasis::LessonCountdownFull;
+        } elseif ($daysBeforeSession >= $halfDays) {
+            $percentage = $halfPercent;
+            $basis = RefundBasis::LessonCountdownHalf;
         } else {
-            $policyType = 'short_term';
-
-            if ($daysBeforeSession >= $fullDays) {
-                $percentage = 100;
-                $basis = RefundBasis::ShortTermFull;
-            } elseif ($daysBeforeSession >= $halfDays) {
-                $percentage = $halfPercent;
-                $basis = RefundBasis::ShortTermHalf;
-            } else {
-                $percentage = 0;
-                $basis = RefundBasis::ShortTermNoRefund;
-            }
+            $percentage = 0;
+            $basis = RefundBasis::LessonCountdownNoRefund;
         }
 
         $refundAmount = round($lessonPrice * ($percentage / 100), 2);

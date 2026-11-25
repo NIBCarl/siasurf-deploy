@@ -152,7 +152,7 @@ class CancellationAndRefundTest extends TestCase
 
         $refund = Refund::where('booking_id', $booking->id)->first();
         $this->assertNotNull($refund);
-        $this->assertSame(RefundBasis::ShortTermFull, $refund->basis);
+        $this->assertSame(RefundBasis::LessonCountdownFull, $refund->basis);
         $this->assertSame('1200.00', $refund->amount);
         $this->assertSame('84.00', $refund->service_fee_retained);
         $this->assertSame(100, $refund->refund_percentage);
@@ -420,7 +420,7 @@ class CancellationAndRefundTest extends TestCase
         $acceptedBooking->refresh();
         $this->assertSame(CancellationReason::Student, $acceptedBooking->cancellation_reason);
         $acceptedRefund = Refund::where('booking_id', $acceptedBooking->id)->firstOrFail();
-        $this->assertSame(RefundBasis::ShortTermHalf, $acceptedRefund->basis);
+        $this->assertSame(RefundBasis::LessonCountdownHalf, $acceptedRefund->basis);
         $this->assertSame('600.00', $acceptedRefund->amount);
         $this->assertSame('600.00', $acceptedRefund->instructor_retained_amount);
     }
@@ -584,7 +584,7 @@ class CancellationAndRefundTest extends TestCase
     {
         $actors = $this->createActors();
 
-        // Student cancelled < 3 days before session (0% automatic refund), then Admin grants ₱600 override
+        // Student cancelled < 3 days before session (0% automatic refund), then Admin grants â‚±600 override
         [$booking] = $this->createPaidGcashBooking($actors, daysUntilSession: 1, daysSincePayment: 2);
         $this->actingAs($actors['student'])
             ->post(route('student.bookings.cancel', $booking), ['reason' => 'Late cancellation'])
@@ -614,8 +614,8 @@ class CancellationAndRefundTest extends TestCase
             'refund_percentage' => 100,
             'amount' => 1200.00,
             'instructor_retained_amount' => 0.00,
-            'policy_type' => 'short_term',
-            'basis' => RefundBasis::ShortTermFull,
+            'policy_type' => 'lesson_countdown',
+            'basis' => RefundBasis::LessonCountdownFull,
             'days_before_session' => 12,
             'days_since_payment' => 1,
             'status' => RefundStatus::Failed,

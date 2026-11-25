@@ -32,6 +32,7 @@ class LegalController extends Controller
                 'standard_hours' => (int) config('siasurf.session.standard_hours', 2),
                 'refund_long_term_threshold_days' => (int) config('siasurf.refunds.long_term_threshold_days', 30),
                 'refund_long_term_window_days' => (int) config('siasurf.refunds.long_term_window_days', 30),
+                'refund_max_days_from_payment' => (int) config('siasurf.refunds.max_days_from_payment', 30),
                 'refund_short_term_full_days' => (int) config('siasurf.refunds.short_term_full_days', 7),
                 'refund_short_term_half_days' => (int) config('siasurf.refunds.short_term_half_days', 3),
                 'refund_short_term_half_percent' => (int) config('siasurf.refunds.short_term_half_percent', 50),

@@ -81,7 +81,7 @@ class RefundCalculatorServiceTest extends TestCase
     }
 
     #[Test]
-    public function r1_long_term_booking_within_30_days_of_payment_gets_100_percent_lesson_price_and_retains_7_percent_fee(): void
+    public function r1_a_booking_made_45_days_ahead_cancelled_35_days_before_the_lesson_gets_100_percent(): void
     {
         // Booked 45 days ahead, cancelled 10 days after payment (35 days before session)
         $booking = $this->makePaidGcashBooking(
@@ -94,8 +94,8 @@ class RefundCalculatorServiceTest extends TestCase
 
         $this->assertTrue($calc->eligible);
         $this->assertTrue($calc->requiresRefundRecord);
-        $this->assertSame('long_term', $calc->policyType);
-        $this->assertSame(RefundBasis::LongTermWithin30Days, $calc->basis);
+        $this->assertSame('lesson_countdown', $calc->policyType);
+        $this->assertSame(RefundBasis::LessonCountdownFull, $calc->basis);
         $this->assertSame(100, $calc->refundPercentage);
         $this->assertSame(1200.00, $calc->refundAmount);
         $this->assertSame(84.00, $calc->serviceFeeRetained);
@@ -105,7 +105,7 @@ class RefundCalculatorServiceTest extends TestCase
     }
 
     #[Test]
-    public function r1_boundary_exactly_30_days_since_payment_on_long_term_still_gets_100_percent(): void
+    public function r1_boundary_long_term_booking_cancelled_15_days_out_gets_100_percent_and_auto_dispatches(): void
     {
         $booking = $this->makePaidGcashBooking(
             leadDaysFromBooking: 45,
@@ -115,63 +115,132 @@ class RefundCalculatorServiceTest extends TestCase
 
         $calc = $this->calculator->calculate($booking, CancellationReason::Student, $this->cancelNow);
 
-        $this->assertSame(RefundBasis::LongTermWithin30Days, $calc->basis);
+        $this->assertSame('lesson_countdown', $calc->policyType);
+        $this->assertSame(RefundBasis::LessonCountdownFull, $calc->basis);
         $this->assertSame(100, $calc->refundPercentage);
         $this->assertSame(1200.00, $calc->refundAmount);
         $this->assertTrue($calc->canAutoDispatch);
     }
 
+    /**
+     * BR-CXL-11 regression guard.
+     *
+     * The retired split policy granted 100% to any long-term booking cancelled
+     * within 30 days of PAYMENT. A tourist could therefore book 32 days ahead
+     * and cancel 2 days before the lesson (day 30 after payment) for a full
+     * refund, leaving the instructor an unfillable slot. The unified countdown
+     * anchors on the lesson instead, so this now yields nothing.
+     */
     #[Test]
-    public function r2_long_term_past_30_days_falls_through_to_short_term_sliding_window_with_manual_review(): void
+    public function r1_the_late_cancellation_loophole_is_closed(): void
     {
-        // Day 31 from payment with 10 days before session -> falls through to 7+ days = 100%, manual_required
-        $fullFallThrough = $this->makePaidGcashBooking(
+        $booking = $this->makePaidGcashBooking(
+            leadDaysFromBooking: 32,
+            daysBeforeSession: 2,
+            daysSincePayment: 30,
+        );
+
+        $calc = $this->calculator->calculate($booking, CancellationReason::Student, $this->cancelNow);
+
+        $this->assertSame('lesson_countdown', $calc->policyType);
+        $this->assertFalse($calc->eligible);
+        $this->assertSame(RefundBasis::LessonCountdownNoRefund, $calc->basis);
+        $this->assertSame(0, $calc->refundPercentage);
+        $this->assertSame(0.00, $calc->refundAmount);
+        $this->assertSame(1200.00, $calc->instructorRetainedAmount);
+        $this->assertSame('none', $calc->dispatchMode);
+    }
+
+    /**
+     * BR-CXL-11 fairness guard.
+     *
+     * Under the retired policy the same lesson refunded differently depending
+     * on when it was booked: 50 days of lead + cancel 15 days out = 0%, while
+     * 20 days of lead + cancel 15 days out = 50%. Booking early must never
+     * change the outcome.
+     */
+    #[Test]
+    public function r1_booking_lead_time_never_changes_the_refund_outcome(): void
+    {
+        $earlyBooker = $this->makePaidGcashBooking(
+            leadDaysFromBooking: 50,
+            daysBeforeSession: 15,
+            daysSincePayment: 35,
+            transactionId: 'cs_early',
+            gatewayPaymentId: 'pay_early',
+        );
+        $lateBooker = $this->makePaidGcashBooking(
+            leadDaysFromBooking: 20,
+            daysBeforeSession: 15,
+            daysSincePayment: 5,
+            transactionId: 'cs_late',
+            gatewayPaymentId: 'pay_late',
+        );
+
+        $early = $this->calculator->calculate($earlyBooker, CancellationReason::Student, $this->cancelNow);
+        $late = $this->calculator->calculate($lateBooker, CancellationReason::Student, $this->cancelNow);
+
+        $this->assertSame($late->refundPercentage, $early->refundPercentage);
+        $this->assertSame($late->refundAmount, $early->refundAmount);
+        $this->assertSame(100, $early->refundPercentage);
+
+        // Same entitlement, but settlement differs: payment older than 30 days
+        // is routed to SISA for manual completion.
+        $this->assertSame('manual_required', $early->dispatchMode);
+        $this->assertSame('paymongo', $late->dispatchMode);
+    }
+
+    #[Test]
+    public function r2_payment_age_never_changes_the_percentage_only_the_dispatch_mode(): void
+    {
+        // 10 days before session -> 7+ days = 100%, but payment is 31 days old.
+        $full = $this->makePaidGcashBooking(
             leadDaysFromBooking: 45,
             daysBeforeSession: 10,
             daysSincePayment: 31,
             transactionId: 'cs_paymongo_1',
             gatewayPaymentId: 'pay_live_1',
         );
-        $fullCalc = $this->calculator->calculate($fullFallThrough, CancellationReason::Student, $this->cancelNow);
+        $fullCalc = $this->calculator->calculate($full, CancellationReason::Student, $this->cancelNow);
 
         $this->assertTrue($fullCalc->eligible);
-        $this->assertSame('long_term', $fullCalc->policyType);
-        $this->assertSame(RefundBasis::LongTermFallbackFull, $fullCalc->basis);
+        $this->assertSame('lesson_countdown', $fullCalc->policyType);
+        $this->assertSame(RefundBasis::LessonCountdownFull, $fullCalc->basis);
         $this->assertSame(100, $fullCalc->refundPercentage);
         $this->assertSame(1200.00, $fullCalc->refundAmount);
         $this->assertSame(84.00, $fullCalc->serviceFeeRetained);
         $this->assertFalse($fullCalc->canAutoDispatch);
         $this->assertSame('manual_required', $fullCalc->dispatchMode);
 
-        // Day 36 from payment with 5 days left -> falls through to 3-6 days = 50%, manual_required
-        $halfFallThrough = $this->makePaidGcashBooking(
+        // 5 days before session -> 3-6 days = 50%, payment 36 days old.
+        $half = $this->makePaidGcashBooking(
             leadDaysFromBooking: 45,
             daysBeforeSession: 5,
             daysSincePayment: 36,
             transactionId: 'cs_paymongo_2',
             gatewayPaymentId: 'pay_live_2',
         );
-        $halfCalc = $this->calculator->calculate($halfFallThrough, CancellationReason::Student, $this->cancelNow);
+        $halfCalc = $this->calculator->calculate($half, CancellationReason::Student, $this->cancelNow);
 
         $this->assertTrue($halfCalc->eligible);
-        $this->assertSame(RefundBasis::LongTermFallbackHalf, $halfCalc->basis);
+        $this->assertSame(RefundBasis::LessonCountdownHalf, $halfCalc->basis);
         $this->assertSame(50, $halfCalc->refundPercentage);
         $this->assertSame(600.00, $halfCalc->refundAmount);
         $this->assertSame(600.00, $halfCalc->instructorRetainedAmount);
         $this->assertSame(84.00, $halfCalc->serviceFeeRetained);
         $this->assertSame('manual_required', $halfCalc->dispatchMode);
 
-        // Day 40 from payment with 2 days left -> falls through to < 3 days = 0%
-        $zeroFallThrough = $this->makePaidGcashBooking(
+        // 2 days before session -> under 3 days = 0%.
+        $zero = $this->makePaidGcashBooking(
             leadDaysFromBooking: 45,
             daysBeforeSession: 2,
             daysSincePayment: 40,
         );
-        $zeroCalc = $this->calculator->calculate($zeroFallThrough, CancellationReason::Student, $this->cancelNow);
+        $zeroCalc = $this->calculator->calculate($zero, CancellationReason::Student, $this->cancelNow);
 
         $this->assertFalse($zeroCalc->eligible);
         $this->assertFalse($zeroCalc->requiresRefundRecord);
-        $this->assertSame(RefundBasis::LongTermFallbackNoRefund, $zeroCalc->basis);
+        $this->assertSame(RefundBasis::LessonCountdownNoRefund, $zeroCalc->basis);
         $this->assertSame(0, $zeroCalc->refundPercentage);
         $this->assertSame(0.00, $zeroCalc->refundAmount);
         $this->assertSame(1200.00, $zeroCalc->instructorRetainedAmount);
@@ -194,8 +263,8 @@ class RefundCalculatorServiceTest extends TestCase
 
         $calc = $this->calculator->calculate($booking, CancellationReason::Student, $this->cancelNow);
 
-        $this->assertSame('short_term', $calc->policyType);
-        $this->assertSame(RefundBasis::ShortTermHalf, $calc->basis);
+        $this->assertSame('lesson_countdown', $calc->policyType);
+        $this->assertSame(RefundBasis::LessonCountdownHalf, $calc->basis);
         $this->assertSame(50, $calc->refundPercentage);
         $this->assertSame(600.00, $calc->refundAmount);
     }
@@ -208,7 +277,7 @@ class RefundCalculatorServiceTest extends TestCase
             $booking = $this->makePaidGcashBooking(leadDaysFromBooking: 20, daysBeforeSession: $days, daysSincePayment: 2);
             $calc = $this->calculator->calculate($booking, CancellationReason::Student, $this->cancelNow);
 
-            $this->assertSame(RefundBasis::ShortTermFull, $calc->basis);
+            $this->assertSame(RefundBasis::LessonCountdownFull, $calc->basis);
             $this->assertSame(100, $calc->refundPercentage);
             $this->assertSame(1200.00, $calc->refundAmount);
             $this->assertSame(0.00, $calc->instructorRetainedAmount);
@@ -220,7 +289,7 @@ class RefundCalculatorServiceTest extends TestCase
             $booking = $this->makePaidGcashBooking(leadDaysFromBooking: 14, daysBeforeSession: $days, daysSincePayment: 2);
             $calc = $this->calculator->calculate($booking, CancellationReason::Student, $this->cancelNow);
 
-            $this->assertSame(RefundBasis::ShortTermHalf, $calc->basis);
+            $this->assertSame(RefundBasis::LessonCountdownHalf, $calc->basis);
             $this->assertSame(50, $calc->refundPercentage);
             $this->assertSame(600.00, $calc->refundAmount);
             $this->assertSame(600.00, $calc->instructorRetainedAmount);
@@ -234,7 +303,7 @@ class RefundCalculatorServiceTest extends TestCase
 
             $this->assertFalse($calc->eligible);
             $this->assertFalse($calc->requiresRefundRecord);
-            $this->assertSame(RefundBasis::ShortTermNoRefund, $calc->basis);
+            $this->assertSame(RefundBasis::LessonCountdownNoRefund, $calc->basis);
             $this->assertSame(0, $calc->refundPercentage);
             $this->assertSame(0.00, $calc->refundAmount);
             $this->assertSame(1200.00, $calc->instructorRetainedAmount);
@@ -342,8 +411,8 @@ class RefundCalculatorServiceTest extends TestCase
         // After student accepts the rescheduled date -> uses snapshotted is_long_term (true) + fall-through via current date (5 days left -> 50%)
         $booking->student_accepted_reschedule_at = $this->cancelNow->copy();
         $acceptedCalc = $this->calculator->calculate($booking, CancellationReason::Student, $this->cancelNow);
-        $this->assertSame('long_term', $acceptedCalc->policyType);
-        $this->assertSame(RefundBasis::LongTermFallbackHalf, $acceptedCalc->basis);
+        $this->assertSame('lesson_countdown', $acceptedCalc->policyType);
+        $this->assertSame(RefundBasis::LessonCountdownHalf, $acceptedCalc->basis);
         $this->assertSame(50, $acceptedCalc->refundPercentage);
         $this->assertSame(600.00, $acceptedCalc->refundAmount);
     }

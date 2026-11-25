@@ -112,14 +112,28 @@ return [
 
     /*
     |--------------------------------------------------------------------------
-    | Cancellation & Tiered Refund Policy (BR-CXL-01 to BR-CXL-10)
+    | Cancellation & Tiered Refund Policy (BR-CXL-11 Unified Lesson Countdown)
     |--------------------------------------------------------------------------
     |
-    | Long-term bookings (> 30 days ahead at booking time) allow free 100%
-    | lesson-price cancellation within 30 days of payment; after 30 days they
-    | fall through to the short-term sliding window (7+ days: 100%, 3-6 days:
-    | 50%, < 3 days / same day: 0%). Refunds beyond PayMongo's 30-day window
-    | are routed to manual SISA completion.
+    | Refund ELIGIBILITY is anchored only to the scheduled lesson start, never
+    | to the payment date, so booking early can never reduce a tourist's refund
+    | and cancelling late can never be used to claim 100%:
+    |
+    |   7+ days before the lesson : 100% of the lesson price
+    |   3-6 days before the lesson: 50%
+    |   under 3 days / no-show    : 0%
+    |
+    | The 7% service fee is never refunded. Instructor-side, weather/safety,
+    | and suspension cancellations always refund 100% of the lesson price.
+    |
+    | `max_days_from_payment` does NOT affect eligibility. It only decides
+    | settlement dispatch: within 30 days a qualifying refund is sent through
+    | the gateway automatically, after 30 days it is flagged `manual_required`
+    | so SISA completes it manually instead of hitting a settled payout.
+    |
+    | `long_term_threshold_days` / `long_term_window_days` are retained only so
+    | older settings rows and the admin Settings form keep loading; they no
+    | longer influence any refund calculation.
     |
     */
 

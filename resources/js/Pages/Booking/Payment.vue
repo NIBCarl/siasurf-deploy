@@ -438,20 +438,15 @@ const goBack = () => {
         </p>
 
         <div class="rounded-xl border border-slate-200 bg-slate-50 p-4 space-y-2 text-xs text-slate-700">
-          <p class="font-bold text-slate-900">Long-Term GCash Bookings (&gt; 30 days ahead at booking)</p>
+          <p class="font-bold text-slate-900">Refund countdown (measured from your lesson start time)</p>
           <ul class="list-disc pl-4 space-y-1">
-            <li>Within 30 days of payment: <strong>100% of lesson price</strong> (auto-refund via PayMongo).</li>
-            <li>After 30 days from payment: falls through to the Short-Term sliding window below (processed by SISA).</li>
+            <li><strong>7 or more days</strong> before the lesson: <strong>100% of lesson price</strong> refunded.</li>
+            <li><strong>3–6 days</strong> before the lesson: <strong>50% of lesson price</strong> refunded.</li>
+            <li><strong>Under 3 days / same day / no-show</strong>: <strong>No refund</strong>.</li>
           </ul>
-        </div>
-
-        <div class="rounded-xl border border-slate-200 bg-slate-50 p-4 space-y-2 text-xs text-slate-700">
-          <p class="font-bold text-slate-900">Short-Term GCash Bookings (&le; 30 days ahead at booking)</p>
-          <ul class="list-disc pl-4 space-y-1">
-            <li><strong>7+ days</strong> before session: <strong>100% of lesson price</strong> refunded.</li>
-            <li><strong>3–6 days</strong> before session: <strong>50% of lesson price</strong> refunded.</li>
-            <li><strong>Under 3 days / Same day / No-show</strong>: <strong>No refund</strong>.</li>
-          </ul>
+          <p class="pt-1 text-slate-600">
+            The same percentages apply however far in advance you booked. Refunds within 30 days of payment are sent back automatically through GCash; later refunds are completed manually by SISA at the same percentage.
+          </p>
         </div>
 
         <div class="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-xs text-emerald-900">

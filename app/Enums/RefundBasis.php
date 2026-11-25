@@ -4,13 +4,9 @@ namespace App\Enums;
 
 enum RefundBasis: string
 {
-    case LongTermWithin30Days = 'long_term_within_30d';
-    case LongTermFallbackFull = 'long_term_fallback_7_plus_days';
-    case LongTermFallbackHalf = 'long_term_fallback_3_to_6_days';
-    case LongTermFallbackNoRefund = 'long_term_fallback_under_3_days';
-    case ShortTermFull = 'short_term_7_plus_days';
-    case ShortTermHalf = 'short_term_3_to_6_days';
-    case ShortTermNoRefund = 'short_term_under_3_days';
+    case LessonCountdownFull = 'lesson_countdown_7_plus_days';
+    case LessonCountdownHalf = 'lesson_countdown_3_to_6_days';
+    case LessonCountdownNoRefund = 'lesson_countdown_under_3_days';
     case InstructorCancelled = 'instructor_cancelled';
     case WeatherSafety = 'weather_safety';
     case InstructorNoShow = 'instructor_no_show';
@@ -24,18 +20,14 @@ enum RefundBasis: string
     public function label(): string
     {
         return match ($this) {
-            self::LongTermWithin30Days => 'Long-term booking (within 30 days of payment)',
-            self::LongTermFallbackFull => 'Long-term fall-through (7+ days before session)',
-            self::LongTermFallbackHalf => 'Long-term fall-through (3–6 days before session)',
-            self::LongTermFallbackNoRefund => 'Long-term fall-through (under 3 days before session)',
-            self::ShortTermFull => 'Short-term booking (7+ days before session)',
-            self::ShortTermHalf => 'Short-term booking (3–6 days before session)',
-            self::ShortTermNoRefund => 'Short-term booking (under 3 days before session)',
+            self::LessonCountdownFull => '7 or more days before the lesson (100%)',
+            self::LessonCountdownHalf => '3 to 6 days before the lesson (50%)',
+            self::LessonCountdownNoRefund => 'Under 3 days before the lesson (no refund)',
             self::InstructorCancelled => 'Cancelled by instructor (100% lesson price)',
             self::WeatherSafety => 'Cancelled due to unsafe weather or sea conditions',
             self::InstructorNoShow => 'Instructor did not arrive (100% lesson price)',
             self::InstructorSuspended => 'Instructor account suspended (100% lesson price)',
-            self::InstructorRescheduleDeclined => 'Instructor rescheduled — student declined / cancelled',
+            self::InstructorRescheduleDeclined => 'Instructor rescheduled – student declined / cancelled',
             self::StudentNoShow => 'Student no-show (no refund)',
             self::CashUncollected => 'Cash booking cancelled (no amount collected)',
             self::PendingUnpaid => 'Unpaid request withdrawn (no charge)',
@@ -46,13 +38,9 @@ enum RefundBasis: string
     public function description(): string
     {
         return match ($this) {
-            self::LongTermWithin30Days => '100% of the lesson price is refunded (7% service fee retained).',
-            self::LongTermFallbackFull,
-            self::ShortTermFull => '100% of the lesson price is refunded when cancelled 7 or more days before the lesson (7% service fee retained).',
-            self::LongTermFallbackHalf,
-            self::ShortTermHalf => '50% of the lesson price is refunded when cancelled 3 to 6 days before the lesson; 50% goes to the instructor and the 7% service fee is retained.',
-            self::LongTermFallbackNoRefund,
-            self::ShortTermNoRefund => 'No refund applies less than 3 days before the lesson; the lesson price goes to the instructor and the 7% service fee is retained.',
+            self::LessonCountdownFull => '100% of the lesson price is refunded when cancelled 7 or more days before the lesson, however far in advance it was booked (7% service fee retained).',
+            self::LessonCountdownHalf => '50% of the lesson price is refunded when cancelled 3 to 6 days before the lesson; 50% goes to the instructor and the 7% service fee is retained.',
+            self::LessonCountdownNoRefund => 'No refund applies less than 3 days before the lesson; the lesson price goes to the instructor and the 7% service fee is retained.',
             self::InstructorCancelled,
             self::WeatherSafety,
             self::InstructorNoShow,

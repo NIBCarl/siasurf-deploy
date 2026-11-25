@@ -645,7 +645,7 @@ const resetSectionDefaults = (group: SectionKey, label: string) => {
 
           <div class="grid gap-5 md:grid-cols-2 lg:grid-cols-3">
             <div>
-              <InputLabel value="Long-term booking lead threshold (days)" />
+              <InputLabel value="Booking lead-time reference (days)" />
               <TextInput
                 v-model.number="form.refunds.long_term_threshold_days"
                 type="number"
@@ -655,13 +655,13 @@ const resetSectionDefaults = (group: SectionKey, label: string) => {
                 class="mt-1 w-full"
               />
               <p class="mt-1 text-xs text-slate-500">
-                Sessions scheduled more than this many days ahead qualify as long-term.
+                Reporting only. Refund eligibility follows the lesson countdown, not the booking lead time.
               </p>
               <InputError :message="formErrors['refunds.long_term_threshold_days']" class="mt-1" />
             </div>
 
             <div>
-              <InputLabel value="Long-term free cancellation window (days)" />
+              <InputLabel value="Manual-dispatch threshold (days from payment)" />
               <TextInput
                 v-model.number="form.refunds.long_term_window_days"
                 type="number"
@@ -671,7 +671,7 @@ const resetSectionDefaults = (group: SectionKey, label: string) => {
                 class="mt-1 w-full"
               />
               <p class="mt-1 text-xs text-slate-500">
-                Days after payment when a long-term booking gets a 100% lesson-price refund.
+                Refunds requested later than this are completed manually by SISA. Does not change refund amounts.
               </p>
               <InputError :message="formErrors['refunds.long_term_window_days']" class="mt-1" />
             </div>
