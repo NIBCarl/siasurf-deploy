@@ -152,6 +152,33 @@ class BookingController extends Controller
             ->paginate(20)
             ->withQueryString();
 
+        $batchIds = $changeRequests->getCollection()
+            ->pluck('batch_id')
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
+
+        $batchStats = empty($batchIds)
+            ? collect()
+            : BookingChangeRequest::query()
+                ->whereIn('batch_id', $batchIds)
+                ->selectRaw('batch_id, COUNT(*) as total_count, SUM(CASE WHEN status = ? THEN 1 ELSE 0 END) as pending_count', [
+                    ChangeRequestStatus::Pending->value,
+                ])
+                ->groupBy('batch_id')
+                ->get()
+                ->keyBy('batch_id');
+
+        $changeRequests->through(function (BookingChangeRequest $changeRequest) use ($batchStats) {
+            $stat = $changeRequest->batch_id ? $batchStats->get($changeRequest->batch_id) : null;
+
+            return array_merge($changeRequest->toArray(), [
+                'batch_total_count' => $stat ? (int) $stat->total_count : 1,
+                'batch_pending_count' => $stat ? (int) $stat->pending_count : ($changeRequest->isPending() ? 1 : 0),
+            ]);
+        });
+
         return Inertia::render('Admin/ChangeRequests/Index', [
             'changeRequests' => $changeRequests,
             'filters' => ['status' => $status],
@@ -198,5 +225,52 @@ class BookingController extends Controller
         }
 
         return back()->with('success', 'Change request rejected. The booking keeps its original slot.');
+    }
+
+    /**
+     * Approve all pending student-agreed change requests in a shared group batch.
+     */
+    public function approveChangeRequestBatch(
+        Request $request,
+        string $batchId,
+        BookingChangeService $changeService
+    ): RedirectResponse {
+        $validated = $request->validate([
+            'admin_note' => ['nullable', 'string', 'max:500'],
+        ]);
+
+        try {
+            $result = $changeService->approveBatch($batchId, $request->user(), $validated['admin_note'] ?? null);
+        } catch (\App\Exceptions\BookingChangeException $exception) {
+            return back()->with('error', $exception->getMessage());
+        }
+
+        $message = "{$result['approved']} group reschedule request(s) approved and applied.";
+        if ($result['skipped'] > 0) {
+            $message .= " {$result['skipped']} skipped.";
+        }
+
+        return back()->with('success', $message);
+    }
+
+    /**
+     * Reject all pending change requests in a shared group batch.
+     */
+    public function rejectChangeRequestBatch(
+        Request $request,
+        string $batchId,
+        BookingChangeService $changeService
+    ): RedirectResponse {
+        $validated = $request->validate([
+            'admin_note' => ['nullable', 'string', 'max:500'],
+        ]);
+
+        try {
+            $rejected = $changeService->rejectBatch($batchId, $request->user(), $validated['admin_note'] ?? null);
+        } catch (\App\Exceptions\BookingChangeException $exception) {
+            return back()->with('error', $exception->getMessage());
+        }
+
+        return back()->with('success', "{$rejected} group reschedule request(s) rejected. Bookings keep their original slots.");
     }
 }

@@ -92,6 +92,7 @@ return [
         'waiver_hold_minutes' => (int) env('SIASURF_WAIVER_HOLD_MINUTES', 15),
         'payment_hold_minutes' => (int) env('SIASURF_PAYMENT_HOLD_MINUTES', 15),
         'change_approval_threshold_hours' => (int) env('SIASURF_CHANGE_APPROVAL_THRESHOLD_HOURS', 24),
+        'reschedule_proposal_hours' => (int) env('SIASURF_RESCHEDULE_PROPOSAL_HOURS', 24),
     ],
 
     /*

@@ -66,6 +66,7 @@ class ExpirePaymentWindowJob implements ShouldQueue
             // FR 1.4 - its own terminal state, so a payment timeout is not
             // confused with a deliberate cancellation in reports.
             $locked->markPaymentTimedOut();
+            $locked->closeOpenChangeRequests('Closed automatically because the booking expired.');
 
             // Update payment record to Failed
             if ($locked->payment && $locked->payment->status === PaymentStatus::Pending) {

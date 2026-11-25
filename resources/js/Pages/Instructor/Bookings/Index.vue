@@ -8,7 +8,7 @@ import EmptyState from '@/Components/UI/EmptyState.vue'
 import StatusPill from '@/Components/UI/StatusPill.vue'
 import Modal from '@/Components/Modal.vue'
 import Dropdown from '@/Components/Dropdown.vue'
-import RescheduleModal from '@/Components/Molecules/RescheduleModal.vue'
+import RescheduleModal, { type SessionBookingOption } from '@/Components/Molecules/RescheduleModal.vue'
 import {
   BanknotesIcon,
   CalendarDaysIcon,
@@ -19,6 +19,7 @@ import {
   DocumentCheckIcon,
   ExclamationTriangleIcon,
   MapPinIcon,
+  UserGroupIcon,
 } from '@heroicons/vue/24/outline'
 
 interface ChangeRequestSummary {
@@ -71,6 +72,19 @@ interface Booking {
   requires_admin_approval_for_change?: boolean
   has_pending_change_request?: boolean
   has_pending_reschedule_proposal?: boolean
+  reschedule_batch?: {
+    batch_id: string
+    total: number
+    agreed_count: number
+    awaiting_student_count: number
+    awaiting_admin_count: number
+    declined_count: number
+    open_count: number
+    has_schedule_split: boolean
+  } | null
+  shared_session_count?: number
+  session_bookings?: SessionBookingOption[]
+  surf_spot_id?: number | null
   is_rescheduled?: boolean
   rescheduled_by_instructor_at?: string | null
   can_mark_attendance?: boolean
@@ -485,8 +499,9 @@ const submitChange = () => {
   })
 }
 
-const withdrawChange = (booking: Booking) => {
+const withdrawChange = (booking: Booking, scope: 'single' | 'batch' = 'single') => {
   router.delete(route('instructor.bookings.change-request.cancel', booking.id), {
+    data: scope === 'batch' ? { scope: 'batch' } : {},
     preserveScroll: true,
   })
 }
@@ -733,9 +748,25 @@ const toggleDetails = (id: number) => {
                                 {{ booking.attendance_label }}
                             </span>
 
+                            <span
+                                v-if="(booking.shared_session_count ?? 1) > 1"
+                                class="chip chip-neutral"
+                            >
+                                <UserGroupIcon class="h-3.5 w-3.5" aria-hidden="true" />
+                                Shared session · {{ booking.shared_session_count }} surfers
+                            </span>
+
                             <span v-if="booking.has_pending_reschedule_proposal" class="chip chip-warning">
                                 <ClockIcon class="h-3.5 w-3.5" aria-hidden="true" />
-                                Awaiting student agreement
+                                <template v-if="booking.reschedule_batch">
+                                    Reschedule · {{ booking.reschedule_batch.agreed_count }}/{{ booking.reschedule_batch.total }} agreed
+                                    <template v-if="booking.reschedule_batch.declined_count > 0">
+                                        · {{ booking.reschedule_batch.declined_count }} declined
+                                    </template>
+                                </template>
+                                <template v-else>
+                                    Awaiting student agreement
+                                </template>
                             </span>
 
                             <span v-else-if="booking.has_pending_change_request" class="chip chip-warning">
@@ -845,7 +876,7 @@ const toggleDetails = (id: number) => {
                                         class="menu-item"
                                         @click="openChange(booking, 'reschedule')"
                                     >
-                                        Reschedule
+                                        {{ (booking.shared_session_count ?? 1) > 1 ? `Reschedule session (${booking.shared_session_count})` : 'Reschedule' }}
                                     </button>
                                     <button
                                         v-if="canChange(booking)"
@@ -862,6 +893,14 @@ const toggleDetails = (id: number) => {
                                         @click="withdrawChange(booking)"
                                     >
                                         Withdraw change request
+                                    </button>
+                                    <button
+                                        v-if="pendingChangeRequest(booking) && (booking.reschedule_batch?.open_count ?? 0) > 1"
+                                        type="button"
+                                        class="menu-item menu-item-danger"
+                                        @click="withdrawChange(booking, 'batch')"
+                                    >
+                                        Withdraw all in group ({{ booking.reschedule_batch?.open_count }})
                                     </button>
                                 </template>
                             </Dropdown>
@@ -946,6 +985,7 @@ const toggleDetails = (id: number) => {
         <RescheduleModal
             :show="rescheduleTarget !== null"
             :booking="rescheduleTarget"
+            :session-bookings="rescheduleTarget?.session_bookings"
             @close="rescheduleTarget = null"
         />
 

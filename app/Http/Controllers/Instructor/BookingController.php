@@ -41,10 +41,14 @@ class BookingController extends Controller
     /**
      * Display a listing of bookings for the instructor.
      */
-    public function index(Request $request, AvailabilityService $availabilityService): Response
-    {
+    public function index(
+        Request $request,
+        AvailabilityService $availabilityService,
+        BookingChangeService $changeService
+    ): Response {
         $user = auth()->user();
         $availabilityService->releaseExpiredCheckoutHolds($user->id);
+        $changeService->expireStaleProposals($user->id);
 
         $status = $request->query('status');
 
@@ -92,9 +96,45 @@ class BookingController extends Controller
             ->paginate(10)
             ->withQueryString();
 
+        $pageDates = $bookings->getCollection()
+            ->map(fn (Booking $b) => $availabilityService->dateOf($b))
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
+
+        $slotHoldingByDate = empty($pageDates)
+            ? collect()
+            : Booking::with(['student:id,name', 'changeRequests'])
+                ->where('instructor_id', $user->id)
+                ->whereIn('status', array_map(
+                    fn (BookingStatus $s) => $s->value,
+                    BookingStatus::slotHolding()
+                ))
+                ->where(function ($query) use ($pageDates) {
+                    foreach ($pageDates as $d) {
+                        $query->orWhereDate('date', $d);
+                    }
+                })
+                ->orderBy('id')
+                ->get()
+                ->groupBy(fn (Booking $b) => $availabilityService->dateOf($b));
+
+        $batchIds = $bookings->getCollection()
+            ->map(fn (Booking $b) => $b->pendingRescheduleProposal()?->batch_id)
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
+
+        $batchSummaries = [];
+        foreach ($batchIds as $batchId) {
+            $batchSummaries[$batchId] = $changeService->summarizeBatch($batchId);
+        }
+
         // FR 1.9.3 - the accept countdown and FR 1.9.4 approval flag are computed
         // server side so the card renders correctly on first paint.
-        $bookings->through(function (Booking $booking) {
+        $bookings->through(function (Booking $booking) use ($availabilityService, $slotHoldingByDate, $batchSummaries) {
             $isReserved = $booking->isInStudentCheckout();
             $requiredWaivers = max(1, (int) ($booking->participants_count ?? 1));
             $liabilitySignedCount = $booking->waivers
@@ -104,6 +144,13 @@ class BookingController extends Controller
                 ? $liabilitySignedCount >= $requiredWaivers
                 : $booking->waiver !== null;
             $proposal = $booking->pendingRescheduleProposal();
+            $sessionSiblings = $this->resolveSessionSiblingsFromCollection(
+                $booking,
+                $slotHoldingByDate->get($availabilityService->dateOf($booking), collect())
+            );
+            $sharedSessionCount = $sessionSiblings
+                ->where('is_reserved', false)
+                ->count();
 
             return array_merge($booking->toArray(), [
                 'status' => $isReserved ? BookingStatus::Reserved->value : $booking->status->value,
@@ -130,6 +177,9 @@ class BookingController extends Controller
                     ->contains(fn (BookingChangeRequest $cr) => $cr->isOpen()),
                 'has_pending_reschedule_proposal' => $proposal !== null,
                 'pending_reschedule_proposal' => $proposal?->toProposalPayload(),
+                'reschedule_batch' => $proposal?->batch_id ? ($batchSummaries[$proposal->batch_id] ?? null) : null,
+                'shared_session_count' => $sharedSessionCount,
+                'session_bookings' => $sessionSiblings->values()->all(),
                 'is_rescheduled' => $booking->isRescheduled(),
                 'can_mark_attendance' => $booking->canMarkAttendance(),
                 'attendance_block_reason' => $booking->attendanceBlockReason(),
@@ -176,17 +226,23 @@ class BookingController extends Controller
     /**
      * Display single booking details for the instructor.
      */
-    public function show(Booking $booking, AvailabilityService $availabilityService): Response
-    {
+    public function show(
+        Booking $booking,
+        AvailabilityService $availabilityService,
+        BookingChangeService $changeService
+    ): Response {
         if ($booking->instructor_id !== auth()->id()) {
             abort(403);
         }
 
         if ($booking->checkoutHoldExpired()) {
             $booking->expireAcceptance('Waiver and checkout hold expired after ' . Booking::CHECKOUT_HOLD_MINUTES . ' minutes.');
+            $booking->closeOpenChangeRequests('Closed automatically because the booking expired.');
             $availabilityService->releaseForBooking($booking);
             $booking->refresh();
         }
+
+        $changeService->expireStaleProposals($booking->instructor_id);
 
         $booking->load([
             'student.studentProfile',
@@ -205,7 +261,8 @@ class BookingController extends Controller
             'changeRequests' => fn ($query) => $query->with(['requestedBy', 'reviewedBy'])->latest('id'),
         ]);
 
-        $sessionGroup = $availabilityService->overlappingSessionBookings($booking);
+        $sessionGroup = $availabilityService->overlappingSessionBookings($booking)
+            ->loadMissing(['student:id,name', 'changeRequests']);
         $groupSkills = $sessionGroup->map(fn (Booking $b) => $b->skill_level ?? \App\Enums\SkillLevel::Beginner->value);
         $effectiveSkill = $groupSkills->isNotEmpty()
             ? \App\Enums\SkillLevel::mostRestrictive($groupSkills)
@@ -247,6 +304,15 @@ class BookingController extends Controller
 
         $isReserved = $booking->isInStudentCheckout();
         $proposal = $booking->pendingRescheduleProposal();
+        $latestBatchId = $proposal?->batch_id
+            ?? $booking->changeRequests
+                ->first(fn (BookingChangeRequest $cr) => $cr->isReschedule() && $cr->batch_id !== null)
+                ?->batch_id;
+        $rescheduleBatch = $latestBatchId ? $changeService->summarizeBatch($latestBatchId) : null;
+        $sessionBookings = $sessionGroup
+            ->map(fn (Booking $member) => $this->formatSessionSibling($member))
+            ->values()
+            ->all();
 
         return Inertia::render('Instructor/Bookings/Show', [
             'booking' => $booking,
@@ -278,6 +344,8 @@ class BookingController extends Controller
             'hasConversation' => $booking->conversation !== null,
             'isRescheduled' => $booking->isRescheduled(),
             'pendingRescheduleProposal' => $proposal?->toProposalPayload(),
+            'rescheduleBatch' => $rescheduleBatch,
+            'sessionBookings' => $sessionBookings,
             'canChangeSurfSpot' => $booking->canChangeSurfSpot(),
             'sharedSessionCount' => $sessionGroup->where('status', '!=', BookingStatus::Reserved)->count(),
             'paymentHoldMinutes' => Booking::PAYMENT_HOLD_MINUTES,
@@ -286,7 +354,7 @@ class BookingController extends Controller
     }
 
     /**
-     * Automated available start times for rescheduling a specific booking.
+     * Automated available start times for rescheduling a specific booking or selected session siblings.
      */
     public function rescheduleAvailability(
         Request $request,
@@ -299,10 +367,20 @@ class BookingController extends Controller
 
         $validated = $request->validate([
             'date' => ['required', 'date', 'after_or_equal:today'],
+            'booking_ids' => ['nullable', 'array'],
+            'booking_ids.*' => ['integer'],
         ]);
 
+        $targetBookings = null;
+        if (! empty($validated['booking_ids'])) {
+            $requestedIds = array_values(array_unique(array_map('intval', $validated['booking_ids'])));
+            $targetBookings = $availabilityService->overlappingSessionBookings($booking)
+                ->filter(fn (Booking $b) => $b->instructor_id === auth()->id() && in_array((int) $b->id, $requestedIds, true))
+                ->values();
+        }
+
         return response()->json(
-            $availabilityService->rescheduleStartTimes($booking, $validated['date'])
+            $availabilityService->rescheduleStartTimes($booking, $validated['date'], $targetBookings)
         );
     }
 
@@ -582,8 +660,12 @@ class BookingController extends Controller
      * end_time are derived automatically, the reason is sent to Messages, and
      * the booking only moves once the student agrees (plus SISA if < 24h).
      */
-    public function requestChange(Request $request, Booking $booking, BookingChangeService $changeService): RedirectResponse
-    {
+    public function requestChange(
+        Request $request,
+        Booking $booking,
+        BookingChangeService $changeService,
+        AvailabilityService $availabilityService
+    ): RedirectResponse {
         if ($booking->instructor_id !== auth()->id()) {
             abort(403);
         }
@@ -594,6 +676,9 @@ class BookingController extends Controller
             'cancellation_reason' => ['nullable', 'string', 'in:instructor,weather'],
             'date' => ['nullable', 'required_if:type,reschedule', 'date', 'after_or_equal:today'],
             'start_time' => ['nullable', 'required_if:type,reschedule', 'date_format:H:i'],
+            'booking_ids' => ['nullable', 'array'],
+            'booking_ids.*' => ['integer'],
+            'scope' => ['nullable', 'string', 'in:single,session'],
         ], [
             'reason.required_if' => 'Please enter a reason so the student receives it in Messages before agreeing.',
             'reason.min' => 'Please give a short explanation (at least 3 characters) for the student.',
@@ -614,43 +699,63 @@ class BookingController extends Controller
                     $validated['reason'] ?? null,
                     $cause
                 );
-            } else {
-                $changeRequest = $changeService->requestReschedule(
-                    $booking,
-                    auth()->user(),
-                    [
-                        'date' => $validated['date'],
-                        'start_time' => $validated['start_time'],
-                    ],
-                    $validated['reason'] ?? null
-                );
+
+                if ($changeRequest->requires_admin_approval) {
+                    return back()->with(
+                        'success',
+                        'Your request needs SISA approval because the lesson starts in under '
+                        . Booking::CHANGE_APPROVAL_THRESHOLD_HOURS . ' hours. It will apply once approved.'
+                    );
+                }
+
+                return back()->with('success', ucfirst($changeRequest->type->value) . ' applied successfully.');
             }
+
+            $targetIds = null;
+            if (! empty($validated['booking_ids'])) {
+                $targetIds = array_values(array_unique(array_map('intval', $validated['booking_ids'])));
+            } elseif (($validated['scope'] ?? null) === 'session') {
+                $targetIds = $availabilityService->overlappingSessionBookings($booking)
+                    ->filter(fn (Booking $b) => $b->canBeChanged() && ! $b->hasPendingChangeRequest())
+                    ->pluck('id')
+                    ->map(fn ($id) => (int) $id)
+                    ->values()
+                    ->all();
+            } else {
+                $targetIds = [$booking->id];
+            }
+
+            $createdRequests = $changeService->requestBulkReschedule(
+                $booking,
+                auth()->user(),
+                [
+                    'date' => $validated['date'],
+                    'start_time' => $validated['start_time'],
+                ],
+                $validated['reason'] ?? null,
+                $targetIds
+            );
         } catch (BookingChangeException $exception) {
             return back()->with('error', $exception->getMessage());
         }
 
-        if ($changeRequest->isReschedule()) {
+        if ($createdRequests->count() > 1) {
             return back()->with(
                 'success',
-                'Reschedule request sent to ' . ($booking->student?->name ?? 'the student') . ' and posted in Messages. The schedule will update once the student agrees.'
+                "Reschedule proposal sent to all {$createdRequests->count()} students in this session and posted to each student's Messages."
             );
         }
 
-        if ($changeRequest->requires_admin_approval) {
-            return back()->with(
-                'success',
-                'Your request needs SISA approval because the lesson starts in under '
-                . Booking::CHANGE_APPROVAL_THRESHOLD_HOURS . ' hours. It will apply once approved.'
-            );
-        }
-
-        return back()->with('success', ucfirst($changeRequest->type->value) . ' applied successfully.');
+        return back()->with(
+            'success',
+            'Reschedule request sent to ' . ($booking->student?->name ?? 'the student') . ' and posted in Messages. The schedule will update once the student agrees.'
+        );
     }
 
     /**
-     * FR 1.9.4 - withdraw a change request that the student or SISA has not decided on yet.
+     * FR 1.9.4 - withdraw a change request (or an entire batch) that the student or SISA has not decided on yet.
      */
-    public function cancelChangeRequest(Booking $booking): RedirectResponse
+    public function cancelChangeRequest(Request $request, Booking $booking, BookingChangeService $changeService): RedirectResponse
     {
         if ($booking->instructor_id !== auth()->id()) {
             abort(403);
@@ -666,7 +771,20 @@ class BookingController extends Controller
             return back()->with('error', 'There is no pending change request to withdraw.');
         }
 
-        $pending->delete();
+        try {
+            if ($request->input('scope') === 'batch' && $pending->batch_id !== null) {
+                $withdrawn = $changeService->withdrawBatch($pending->batch_id, auth()->user());
+
+                return back()->with(
+                    'success',
+                    "Withdrew {$withdrawn->count()} pending reschedule request(s). Bookings keep their original slots."
+                );
+            }
+
+            $changeService->withdraw($pending, auth()->user());
+        } catch (BookingChangeException $exception) {
+            return back()->with('error', $exception->getMessage());
+        }
 
         return back()->with('success', 'Change request withdrawn. The booking keeps its original slot.');
     }
@@ -857,5 +975,111 @@ class BookingController extends Controller
                 ]);
             }
         });
+    }
+
+    /**
+     * Resolve overlapping session siblings from a preloaded same-date collection.
+     *
+     * @param  \Illuminate\Support\Collection<int, Booking>  $sameDayBookings
+     * @return \Illuminate\Support\Collection<int, array<string, mixed>>
+     */
+    private function resolveSessionSiblingsFromCollection(Booking $booking, \Illuminate\Support\Collection $sameDayBookings): \Illuminate\Support\Collection
+    {
+        if (! in_array($booking->status, BookingStatus::slotHolding(), true)) {
+            return collect([$this->formatSessionSibling($booking)]);
+        }
+
+        $rangeOf = function (Booking $item): ?array {
+            $start = $item->start_time?->format('H:i') ?? $item->time_period?->startTime();
+            if (! $start) {
+                return null;
+            }
+
+            $end = $item->end_time?->format('H:i')
+                ?? \Carbon\Carbon::createFromFormat('H:i', $start)
+                    ->addHours($item->resolvedDurationHours())
+                    ->format('H:i');
+
+            return $end > $start ? [$start, $end] : null;
+        };
+
+        $targetRange = $rangeOf($booking);
+        if ($targetRange === null || $sameDayBookings->isEmpty()) {
+            return collect([$this->formatSessionSibling($booking)]);
+        }
+
+        $clusterIds = [$booking->id => true];
+        $clusterRanges = [$targetRange];
+
+        do {
+            $added = false;
+            foreach ($sameDayBookings as $candidate) {
+                if (isset($clusterIds[$candidate->id])) {
+                    continue;
+                }
+
+                $candidateRange = $rangeOf($candidate);
+                if ($candidateRange === null) {
+                    continue;
+                }
+
+                foreach ($clusterRanges as $existingRange) {
+                    if ($candidateRange[0] < $existingRange[1] && $candidateRange[1] > $existingRange[0]) {
+                        $clusterIds[$candidate->id] = true;
+                        $clusterRanges[] = $candidateRange;
+                        $added = true;
+                        break;
+                    }
+                }
+            }
+        } while ($added);
+
+        $cluster = $sameDayBookings
+            ->filter(fn (Booking $candidate) => isset($clusterIds[$candidate->id]))
+            ->values();
+
+        if ($cluster->isEmpty()) {
+            return collect([$this->formatSessionSibling($booking)]);
+        }
+
+        return $cluster->map(fn (Booking $member) => $this->formatSessionSibling($member));
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function formatSessionSibling(Booking $member): array
+    {
+        $isReserved = $member->isInStudentCheckout();
+        $openChange = $member->changeRequests->first(fn (BookingChangeRequest $cr) => $cr->isOpen());
+        $latestReschedule = $member->changeRequests
+            ->where('type', \App\Enums\ChangeRequestType::Reschedule)
+            ->sortByDesc('id')
+            ->first();
+
+        $rescheduleState = match (true) {
+            $openChange?->isAwaitingStudent() => 'awaiting_student',
+            $openChange?->isPending() => 'awaiting_admin',
+            $latestReschedule?->applied_at !== null => 'moved',
+            $latestReschedule?->student_declined_at !== null => 'declined',
+            default => null,
+        };
+
+        return [
+            'id' => $member->id,
+            'booking_ref' => '#SURF-' . str_pad((string) $member->id, 5, '0', STR_PAD_LEFT),
+            'student_name' => $member->student?->name ?? 'Student',
+            'status' => $isReserved ? BookingStatus::Reserved->value : $member->status->value,
+            'is_reserved' => $isReserved,
+            'student_count' => max(1, (int) ($member->student_count ?? 1)),
+            'duration_hours' => $member->resolvedDurationHours(),
+            'start_time' => $member->start_time?->format('H:i'),
+            'end_time' => $member->end_time?->format('H:i'),
+            'can_be_changed' => $member->canBeChanged(),
+            'has_pending_change_request' => $openChange !== null,
+            'requires_admin_approval_for_change' => $member->changeRequiresAdminApproval(),
+            'latest_reschedule_state' => $rescheduleState,
+            'show_url' => route('instructor.bookings.show', $member->id),
+        ];
     }
 }

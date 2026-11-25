@@ -9,6 +9,9 @@ import { formatPhilippineDate } from '@/utils/philippineTime'
 
 interface ChangeRequest {
   id: number
+  batch_id?: string | null
+  batch_total_count?: number
+  batch_pending_count?: number
   type: string
   status: string
   requires_admin_approval: boolean
@@ -93,17 +96,34 @@ const paginationLabel = (label: string) =>
 
 const decisionTarget = ref<ChangeRequest | null>(null)
 const decisionMode = ref<'approve' | 'reject'>('approve')
+const decisionScope = ref<'single' | 'batch'>('single')
 const decisionForm = useForm({ admin_note: '' })
 
-const openDecision = (request: ChangeRequest, mode: 'approve' | 'reject') => {
+const openDecision = (request: ChangeRequest, mode: 'approve' | 'reject', scope: 'single' | 'batch' = 'single') => {
   decisionTarget.value = request
   decisionMode.value = mode
+  decisionScope.value = scope
   decisionForm.reset()
   decisionForm.clearErrors()
 }
 
 const submitDecision = () => {
   if (!decisionTarget.value) return
+
+  if (decisionScope.value === 'batch' && decisionTarget.value.batch_id) {
+    const batchRoute = decisionMode.value === 'approve'
+      ? 'admin.change-requests.batch.approve'
+      : 'admin.change-requests.batch.reject'
+
+    decisionForm.post(route(batchRoute, decisionTarget.value.batch_id), {
+      preserveScroll: true,
+      onSuccess: () => {
+        decisionTarget.value = null
+        decisionForm.reset()
+      },
+    })
+    return
+  }
 
   const routeName = decisionMode.value === 'approve'
     ? 'admin.change-requests.approve'
@@ -177,6 +197,9 @@ const submitDecision = () => {
                 <Badge v-if="request.type === 'reschedule' && request.student_agreed_at" variant="success" size="sm">
                   Student Agreed
                 </Badge>
+                <Badge v-if="request.batch_id && (request.batch_total_count ?? 1) > 1" variant="info" size="sm">
+                  Group session ({{ request.batch_total_count }} requests)
+                </Badge>
                 <Badge
                   v-if="request.type === 'cancellation' && request.booking?.payment?.payment_method === 'gcash' && request.booking?.payment?.status === 'completed'"
                   variant="info"
@@ -229,13 +252,21 @@ const submitDecision = () => {
               </div>
             </div>
 
-            <div v-if="request.status === 'pending'" class="flex flex-col gap-2 min-w-[190px]">
+            <div v-if="request.status === 'pending'" class="flex flex-col gap-2 min-w-[210px]">
               <BaseButton variant="success" @click="openDecision(request, 'approve')">
                 Approve Change
               </BaseButton>
               <BaseButton variant="danger" @click="openDecision(request, 'reject')">
                 Reject Change
               </BaseButton>
+              <template v-if="request.batch_id && (request.batch_pending_count ?? 0) > 1">
+                <BaseButton variant="success" @click="openDecision(request, 'approve', 'batch')">
+                  Approve all ({{ request.batch_pending_count }})
+                </BaseButton>
+                <BaseButton variant="danger" @click="openDecision(request, 'reject', 'batch')">
+                  Reject all ({{ request.batch_pending_count }})
+                </BaseButton>
+              </template>
             </div>
           </div>
         </div>
@@ -276,14 +307,25 @@ const submitDecision = () => {
       <Modal :show="decisionTarget !== null" @close="decisionTarget = null" maxWidth="md">
         <div class="p-6">
           <h2 class="text-lg font-extrabold text-slate-900 mb-2 uppercase tracking-tight">
-            {{ decisionMode === 'approve' ? 'Approve this change?' : 'Reject this change?' }}
+            <template v-if="decisionScope === 'batch'">
+              {{ decisionMode === 'approve'
+                ? `Approve all ${decisionTarget?.batch_pending_count ?? ''} group requests?`
+                : `Reject all ${decisionTarget?.batch_pending_count ?? ''} group requests?` }}
+            </template>
+            <template v-else>
+              {{ decisionMode === 'approve' ? 'Approve this change?' : 'Reject this change?' }}
+            </template>
           </h2>
           <p class="text-sm font-bold text-slate-500 mb-4">
             <template v-if="decisionMode === 'approve'">
-              The booking is updated immediately and both parties are notified.
+              {{ decisionScope === 'batch'
+                ? 'All pending student-agreed bookings in this group session will update immediately and both parties will be notified.'
+                : 'The booking is updated immediately and both parties are notified.' }}
             </template>
             <template v-else>
-              The booking keeps its original slot and both parties are notified.
+              {{ decisionScope === 'batch'
+                ? 'All pending requests in this group session will be rejected. Bookings keep their original slots.'
+                : 'The booking keeps its original slot and both parties are notified.' }}
             </template>
           </p>
 

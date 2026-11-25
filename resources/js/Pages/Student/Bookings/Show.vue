@@ -100,8 +100,13 @@ interface Booking {
   has_submitted_payment?: boolean
   has_pending_receipt_verification?: boolean
   has_pending_reschedule_response?: boolean
+  is_group_reschedule?: boolean
+  is_eligible_for_reschedule_decline_refund?: boolean
+  is_paid_digital?: boolean
+  can_request_reschedule_via_chat?: boolean
   pending_reschedule_proposal?: {
     id: number
+    batch_id?: string | null
     status: string
     requires_admin_approval: boolean
     reason: string | null
@@ -109,6 +114,8 @@ interface Booking {
     original_time_range: string
     new_date: string | null
     new_time_range: string
+    expires_at?: string | null
+    expires_in_seconds?: number
   } | null
   refund_preview?: RefundPreview | null
   latest_refund?: RefundRecord | null
@@ -190,6 +197,7 @@ const isReserved = computed(
   () => props.booking.status === 'reserved' || props.booking.is_reserved === true,
 )
 
+const mountedAtMs = Date.now()
 const holdDeadlineMs = ref(Date.now() + Math.max(0, props.booking.hold_remaining_seconds ?? 0) * 1000)
 const acceptDeadlineMs = ref(
   props.booking.accept_deadline_at
@@ -479,6 +487,12 @@ const pendingReceiptVerification = computed(
 )
 
 const pendingProposal = computed(() => props.booking.pending_reschedule_proposal ?? null)
+const proposalSecondsLeft = computed(() => {
+  const base = pendingProposal.value?.expires_in_seconds ?? 0
+  if (base <= 0) return 0
+  const elapsed = Math.floor((nowTick.value - mountedAtMs) / 1000)
+  return Math.max(0, base - elapsed)
+})
 const isRescheduled = computed(
   () => Boolean(props.booking.is_rescheduled || props.booking.rescheduled_by_instructor_at),
 )
@@ -488,6 +502,22 @@ const hasPendingReschedule = computed(
 
 const acceptingReschedule = ref(false)
 const decliningReschedule = ref(false)
+const showDeclineRescheduleModal = ref(false)
+const declineNote = ref('')
+const chatInitialDraft = ref('')
+
+const openChat = (draft = '') => {
+  chatInitialDraft.value = draft
+  showChat.value = true
+}
+
+const requestRescheduleViaChat = () => {
+  const dateLabel = formatDate(props.booking.date)
+  openChat(
+    `Hi ${props.booking.instructor.name}, would it be possible to reschedule my surf lesson on ${dateLabel} (${scheduledSlot.value})? Preferred new date/time: `,
+  )
+}
+
 const acceptReschedule = () => {
   if (acceptingReschedule.value) return
   acceptingReschedule.value = true
@@ -508,9 +538,13 @@ const declineReschedule = () => {
   decliningReschedule.value = true
   router.post(
     route('student.bookings.decline-reschedule', props.booking.id),
-    {},
+    { note: declineNote.value.trim() || null },
     {
       preserveScroll: true,
+      onSuccess: () => {
+        showDeclineRescheduleModal.value = false
+        declineNote.value = ''
+      },
       onFinish: () => {
         decliningReschedule.value = false
       },
@@ -663,10 +697,18 @@ const canChat = computed(() =>
                 class="rounded-card border border-amber-300 bg-amber-50 p-4"
             >
                 <div class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-                    <div class="space-y-1">
-                        <p class="text-label font-semibold uppercase tracking-[0.06em] text-amber-800">
-                            Reschedule Request — Your Agreement Is Required
-                        </p>
+                    <div class="space-y-1.5">
+                        <div class="flex flex-wrap items-center gap-2">
+                            <p class="text-label font-semibold uppercase tracking-[0.06em] text-amber-800">
+                                Reschedule Request — Your Agreement Is Required
+                            </p>
+                            <span
+                                v-if="booking.is_group_reschedule"
+                                class="rounded-full bg-amber-200/70 px-2 py-0.5 text-[11px] font-semibold text-amber-950"
+                            >
+                                Group session reschedule
+                            </span>
+                        </div>
                         <p class="text-body-sm text-amber-950">
                             <strong>{{ booking.instructor.name }}</strong> wants to move your lesson from
                             <strong>{{ pendingProposal.original_date ? formatDate(pendingProposal.original_date) : formatDate(booking.date) }} ({{ pendingProposal.original_time_range }})</strong>
@@ -675,6 +717,12 @@ const canChat = computed(() =>
                         </p>
                         <p v-if="pendingProposal.reason" class="text-body-sm text-amber-900">
                             <span class="font-semibold">Reason:</span> {{ pendingProposal.reason }}
+                        </p>
+                        <p v-if="pendingProposal.requires_admin_approval" class="text-label font-semibold text-amber-950">
+                            Because your original lesson starts in under 24 hours, SISA Admin approval will run right after you agree.
+                        </p>
+                        <p v-if="proposalSecondsLeft > 0" class="text-label text-amber-900">
+                            Please respond within <Countdown :seconds="proposalSecondsLeft" variant="inline" label="Respond within" />
                         </p>
                         <p class="text-label text-amber-800">
                             The reason was also sent to your Messages so you can talk with your instructor before agreeing.
@@ -691,7 +739,7 @@ const canChat = computed(() =>
                         <AppButton
                             size="sm"
                             variant="secondary"
-                            @click="showChat = true"
+                            @click="openChat()"
                         >
                             Message instructor
                         </AppButton>
@@ -699,7 +747,7 @@ const canChat = computed(() =>
                             size="sm"
                             variant="secondary"
                             :loading="decliningReschedule"
-                            @click="declineReschedule"
+                            @click="showDeclineRescheduleModal = true"
                         >
                             Decline (keep original)
                         </AppButton>
@@ -709,7 +757,7 @@ const canChat = computed(() =>
                             variant="danger"
                             @click="openCancel"
                         >
-                            Cancel (100% refund)
+                            {{ booking.is_paid_digital ? 'Cancel & refund lesson price (excl. 7% fee)' : 'Cancel booking' }}
                         </AppButton>
                     </div>
                 </div>
@@ -1328,10 +1376,19 @@ const canChat = computed(() =>
                                 v-if="canChat"
                                 variant="secondary"
                                 block
-                                @click="showChat = true"
+                                @click="openChat()"
                             >
                                 <ChatBubbleLeftRightIcon class="mr-2 h-4 w-4" aria-hidden="true" />
                                 Message instructor
+                            </AppButton>
+                            <AppButton
+                                v-if="booking.can_request_reschedule_via_chat"
+                                variant="secondary"
+                                block
+                                @click="requestRescheduleViaChat"
+                            >
+                                <ClockIcon class="mr-2 h-4 w-4" aria-hidden="true" />
+                                Request reschedule
                             </AppButton>
                             <AppButton
                                 v-if="canFeedback"
@@ -1462,13 +1519,47 @@ const canChat = computed(() =>
             </div>
         </Modal>
 
-        <Modal :show="showChat" @close="showChat = false" maxWidth="2xl">
+        <Modal :show="showDeclineRescheduleModal" @close="showDeclineRescheduleModal = false" maxWidth="md">
+            <div class="p-6">
+                <h2 class="text-title font-semibold text-deep-900">Decline reschedule and keep original slot?</h2>
+                <p class="mt-1 text-body-sm text-stone-600">
+                    Your booking stays on {{ formatDate(booking.date) }} ({{ scheduledSlot }}) and {{ booking.instructor.name }} is notified right away.
+                    <template v-if="booking.is_paid_digital">
+                        If your instructor cannot keep the original slot and you decide to cancel afterward, you remain eligible for a 100% lesson-price refund (7% platform service fee excluded).
+                    </template>
+                </p>
+
+                <label for="decline-reschedule-note" class="mt-4 block text-label font-semibold uppercase tracking-[0.06em] text-stone-500">
+                    Optional note for instructor
+                </label>
+                <textarea
+                    id="decline-reschedule-note"
+                    v-model="declineNote"
+                    rows="3"
+                    maxlength="500"
+                    placeholder="Let your instructor know what times work better for you (optional)…"
+                    class="mt-2 w-full rounded-control border border-sand-200 bg-white px-3 py-2.5 text-body text-deep-900 focus:border-lagoon-600 focus:ring-lagoon-600"
+                ></textarea>
+
+                <div class="mt-6 flex justify-end gap-2">
+                    <AppButton variant="secondary" :disabled="decliningReschedule" @click="showDeclineRescheduleModal = false">
+                        Back
+                    </AppButton>
+                    <AppButton variant="danger" :loading="decliningReschedule" @click="declineReschedule">
+                        Confirm decline
+                    </AppButton>
+                </div>
+            </div>
+        </Modal>
+
+        <Modal :show="showChat" @close="showChat = false; chatInitialDraft = ''" maxWidth="2xl">
             <div class="p-4 sm:p-6">
                 <ChatBox
                     v-if="showChat"
                     :booking-id="booking.id"
                     :other-party-name="booking.instructor.name"
                     :other-party-avatar="booking.instructor.avatar_path"
+                    :initial-draft="chatInitialDraft"
                 />
             </div>
         </Modal>

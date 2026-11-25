@@ -33,6 +33,20 @@ class BookingChangeResolvedNotification extends Notification implements ShouldQu
     public function toMail(object $notifiable): MailMessage
     {
         $booking = $this->changeRequest->booking;
+        $isStudent = $booking && (int) $notifiable->id === (int) $booking->student_id;
+
+        if ($isStudent && $this->changeRequest->isReschedule() && $this->changeRequest->status === \App\Enums\ChangeRequestStatus::Rejected) {
+            $summary = $this->changeRequest->reviewed_by !== null
+                ? "The reschedule request for booking #{$this->changeRequest->booking_id} was not approved. Your lesson keeps its original schedule."
+                : "Your instructor withdrew the reschedule request for booking #{$this->changeRequest->booking_id}. Your lesson keeps its original schedule.";
+
+            return (new MailMessage)
+                ->subject('Reschedule Request Update')
+                ->greeting('Hello '.$notifiable->name.',')
+                ->line($summary)
+                ->line('- Original schedule: '.$this->changeRequest->describeOriginalSlot())
+                ->action('View Booking', $this->bookingUrl($notifiable, $booking?->id) ?? $this->dashboardUrl($notifiable));
+        }
 
         return (new MailMessage)
             ->subject('Booking '.$this->changeRequest->type->label().' Update')
@@ -49,12 +63,20 @@ class BookingChangeResolvedNotification extends Notification implements ShouldQu
      */
     public function toArray(object $notifiable): array
     {
+        $booking = $this->changeRequest->booking;
+        $isStudent = $booking && (int) $notifiable->id === (int) $booking->student_id;
+        $message = ($isStudent && $this->changeRequest->isReschedule() && $this->changeRequest->status === \App\Enums\ChangeRequestStatus::Rejected)
+            ? ($this->changeRequest->reviewed_by !== null
+                ? "The reschedule request for booking #{$this->changeRequest->booking_id} was not approved. Your lesson keeps its original schedule."
+                : "Your instructor withdrew the reschedule request for booking #{$this->changeRequest->booking_id}. Your lesson keeps its original schedule.")
+            : "Your {$this->changeRequest->type->label()} request for booking #{$this->changeRequest->booking_id} was {$this->changeRequest->status->label()}.";
+
         return [
             'type' => 'booking_change_resolved',
             'change_request_id' => $this->changeRequest->id,
             'booking_id' => $this->changeRequest->booking_id,
             'status' => $this->changeRequest->status->value,
-            'message' => "Your {$this->changeRequest->type->label()} request for booking #{$this->changeRequest->booking_id} was {$this->changeRequest->status->label()}.",
+            'message' => $message,
             'url' => $this->bookingUrl($notifiable, $this->changeRequest->booking_id)
                 ?? $this->dashboardUrl($notifiable),
         ];

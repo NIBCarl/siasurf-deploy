@@ -15,6 +15,7 @@ class BookingChangeRequest extends Model
 
     protected $fillable = [
         'booking_id',
+        'batch_id',
         'requested_by',
         'type',
         'status',
@@ -30,6 +31,7 @@ class BookingChangeRequest extends Model
         'new_start_time',
         'new_end_time',
         'student_notified_at',
+        'expires_at',
         'student_agreed_at',
         'student_declined_at',
         'student_response_note',
@@ -51,6 +53,7 @@ class BookingChangeRequest extends Model
         'new_start_time' => 'datetime:H:i',
         'new_end_time' => 'datetime:H:i',
         'student_notified_at' => 'datetime',
+        'expires_at' => 'datetime',
         'student_agreed_at' => 'datetime',
         'student_declined_at' => 'datetime',
         'reviewed_at' => 'datetime',
@@ -112,6 +115,26 @@ class BookingChangeRequest extends Model
         return $query->where('type', ChangeRequestType::Cancellation);
     }
 
+    public function scopeForBatch($query, string $batchId)
+    {
+        return $query->where('batch_id', $batchId);
+    }
+
+    public function scopeUnexpired($query)
+    {
+        return $query->where(function ($q) {
+            $q->whereNull('expires_at')->orWhere('expires_at', '>', now());
+        });
+    }
+
+    public function scopeExpiredProposals($query)
+    {
+        return $query->reschedule()
+            ->awaitingStudent()
+            ->whereNotNull('expires_at')
+            ->where('expires_at', '<=', now());
+    }
+
     // Helper methods
     public function isPending(): bool
     {
@@ -126,6 +149,22 @@ class BookingChangeRequest extends Model
     public function isOpen(): bool
     {
         return $this->status instanceof ChangeRequestStatus && $this->status->isOpen();
+    }
+
+    public function isExpired(): bool
+    {
+        return $this->isAwaitingStudent()
+            && $this->expires_at !== null
+            && $this->expires_at->isPast();
+    }
+
+    public function getExpiryTimeRemaining(): int
+    {
+        if (! $this->expires_at) {
+            return 0;
+        }
+
+        return max(0, (int) now()->diffInSeconds($this->expires_at, false));
     }
 
     public function hasStudentAgreed(): bool
@@ -241,6 +280,7 @@ class BookingChangeRequest extends Model
     {
         return [
             'id' => $this->id,
+            'batch_id' => $this->batch_id,
             'type' => $this->type?->value,
             'status' => $this->status?->value,
             'status_label' => $this->status?->label(),
@@ -266,6 +306,8 @@ class BookingChangeRequest extends Model
                 $this->new_time_period
             ),
             'student_notified_at' => $this->student_notified_at?->toIso8601String(),
+            'expires_at' => $this->expires_at?->toIso8601String(),
+            'expires_in_seconds' => $this->getExpiryTimeRemaining(),
             'student_agreed_at' => $this->student_agreed_at?->toIso8601String(),
             'student_declined_at' => $this->student_declined_at?->toIso8601String(),
             'created_at' => $this->created_at?->toIso8601String(),

@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Enums\BookingStatus;
 use App\Enums\CancellationReason;
 use App\Enums\InstructorLevel;
+use App\Enums\PaymentMethod;
 use App\Enums\PaymentStatus;
 use App\Enums\RefundStatus;
 use App\Enums\SessionType;
@@ -1110,6 +1111,10 @@ class BookingController extends Controller
         $booking->setAttribute('has_pending_reschedule_response', $booking->hasPendingRescheduleResponse());
         $booking->setAttribute('is_rescheduled', $booking->isRescheduled());
         $booking->setAttribute('pending_reschedule_proposal', $proposal?->toProposalPayload());
+        $booking->setAttribute('is_group_reschedule', $proposal?->batch_id !== null);
+        $booking->setAttribute('is_eligible_for_reschedule_decline_refund', $booking->isEligibleForRescheduleDeclineRefund());
+        $booking->setAttribute('is_paid_digital', $booking->isPaid() && $booking->payment?->payment_method !== PaymentMethod::Cash);
+        $booking->setAttribute('can_request_reschedule_via_chat', $booking->status === BookingStatus::Confirmed && $proposal === null);
         $booking->setAttribute('has_conversation', $booking->conversation !== null);
         $booking->setAttribute(
             'refund_preview',

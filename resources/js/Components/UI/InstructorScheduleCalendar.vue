@@ -5,6 +5,7 @@ import AppButton from '@/Components/UI/AppButton.vue'
 import AppCard from '@/Components/UI/AppCard.vue'
 import Modal from '@/Components/Modal.vue'
 import StatusPill from '@/Components/UI/StatusPill.vue'
+import RescheduleModal, { type RescheduleBookingTarget, type SessionBookingOption } from '@/Components/Molecules/RescheduleModal.vue'
 import { formatPhilippineDate } from '@/utils/philippineTime'
 import {
   CalendarDaysIcon,
@@ -17,6 +18,8 @@ import {
 
 export interface ScheduleBooking {
   id: number
+  instructor_id?: number
+  surf_spot_id?: number | null
   booking_ref: string
   student_name: string
   surf_spot_name: string
@@ -31,6 +34,9 @@ export interface ScheduleBooking {
   duration_hours: number
   status: string
   is_reserved: boolean
+  can_be_changed?: boolean
+  has_pending_change_request?: boolean
+  requires_admin_approval_for_change?: boolean
   waiver_signed: boolean
   payment_method: string | null
   payment_status: string | null
@@ -79,6 +85,69 @@ const schedule = ref<WeekSchedule>(props.initialSchedule)
 const loading = ref(false)
 const loadError = ref<string | null>(null)
 const selectedBooking = ref<ScheduleBooking | null>(null)
+const rescheduleTarget = ref<RescheduleBookingTarget | null>(null)
+const rescheduleSiblings = ref<SessionBookingOption[]>([])
+
+const toSessionOption = (booking: ScheduleBooking): SessionBookingOption => ({
+  id: booking.id,
+  booking_ref: booking.booking_ref,
+  student_name: booking.student_name,
+  status: booking.status,
+  is_reserved: booking.is_reserved,
+  student_count: booking.student_count,
+  duration_hours: booking.duration_hours,
+  start_time: booking.start_time,
+  end_time: booking.end_time,
+  can_be_changed: booking.can_be_changed,
+  has_pending_change_request: booking.has_pending_change_request,
+  requires_admin_approval_for_change: booking.requires_admin_approval_for_change,
+  show_url: booking.show_url,
+})
+
+const selectedSlotSiblings = computed<SessionBookingOption[]>(() => {
+  const active = selectedBooking.value
+  if (!active) return []
+  const day = schedule.value.days.find((d) => d.date === active.date)
+  if (!day) return [toSessionOption(active)]
+
+  const overlapping = day.bookings.filter(
+    (b) => b.start_time < active.end_time && b.end_time > active.start_time,
+  )
+  return overlapping.length > 0 ? overlapping.map(toSessionOption) : [toSessionOption(active)]
+})
+
+const canRescheduleSelectedSlot = computed(() =>
+  selectedSlotSiblings.value.some(
+    (sibling) => sibling.can_be_changed !== false && !sibling.is_reserved && !sibling.has_pending_change_request,
+  ),
+)
+
+const openRescheduleFromSlot = (booking: ScheduleBooking) => {
+  const siblings = selectedSlotSiblings.value
+  const eligible = siblings.find(
+    (sibling) => sibling.can_be_changed !== false && !sibling.is_reserved && !sibling.has_pending_change_request,
+  )
+  const day = schedule.value.days.find((d) => d.date === booking.date)
+  const primaryScheduleBooking = day?.bookings.find((b) => b.id === eligible?.id) ?? booking
+
+  rescheduleSiblings.value = siblings
+  rescheduleTarget.value = {
+    id: primaryScheduleBooking.id,
+    instructor_id: primaryScheduleBooking.instructor_id ?? 0,
+    surf_spot_id: primaryScheduleBooking.surf_spot_id ?? null,
+    date: primaryScheduleBooking.date,
+    time_period: primaryScheduleBooking.time_period,
+    start_time: primaryScheduleBooking.start_time,
+    end_time: primaryScheduleBooking.end_time,
+    duration_hours: primaryScheduleBooking.duration_hours,
+    student_count: primaryScheduleBooking.student_count,
+    skill_level: primaryScheduleBooking.skill_level,
+    session_type: primaryScheduleBooking.session_type,
+    requires_admin_approval_for_change: primaryScheduleBooking.requires_admin_approval_for_change,
+    student: { name: primaryScheduleBooking.student_name },
+  }
+  selectedBooking.value = null
+}
 
 const loadedAt = ref(Date.now())
 const nowTick = ref(Date.now())
@@ -826,6 +895,34 @@ const instructorActionSentence = (booking: ScheduleBooking): string => {
         </dl>
 
         <div
+          v-if="selectedSlotSiblings.length > 1"
+          class="mt-4 rounded-control border border-sand-200 bg-sand-50 p-3 space-y-2"
+        >
+          <p class="text-label font-semibold uppercase tracking-[0.06em] text-stone-500">
+            Shared session ({{ selectedSlotSiblings.length }} surfers in this slot)
+          </p>
+          <div class="space-y-1.5">
+            <div
+              v-for="sibling in selectedSlotSiblings"
+              :key="sibling.id"
+              class="flex items-center justify-between gap-2 text-body-sm"
+            >
+              <span class="truncate font-medium text-deep-900">
+                {{ sibling.student_name }}
+                <span class="text-label text-stone-500">({{ sibling.booking_ref }})</span>
+              </span>
+              <a
+                v-if="sibling.show_url"
+                :href="sibling.show_url"
+                class="shrink-0 text-label font-semibold text-lagoon-700 hover:underline"
+              >
+                Open →
+              </a>
+            </div>
+          </div>
+        </div>
+
+        <div
           v-if="selectedBooking.is_reserved"
           class="mt-4 rounded-control border border-amber-300 bg-amber-50 p-3 text-label text-amber-950"
         >
@@ -841,6 +938,14 @@ const instructorActionSentence = (booking: ScheduleBooking): string => {
               Decline
             </AppButton>
           </template>
+          <AppButton
+            v-if="canRescheduleSelectedSlot && selectedBooking.instructor_id"
+            variant="secondary"
+            size="sm"
+            @click="openRescheduleFromSlot(selectedBooking)"
+          >
+            {{ selectedSlotSiblings.length > 1 ? `Reschedule session (${selectedSlotSiblings.length})` : 'Reschedule' }}
+          </AppButton>
           <AppButton variant="secondary" size="sm" @click="selectedBooking = null">
             Close
           </AppButton>
@@ -850,5 +955,12 @@ const instructorActionSentence = (booking: ScheduleBooking): string => {
         </div>
       </div>
     </Modal>
+
+    <RescheduleModal
+      :show="rescheduleTarget !== null"
+      :booking="rescheduleTarget"
+      :session-bookings="rescheduleSiblings"
+      @close="rescheduleTarget = null"
+    />
   </div>
 </template>

@@ -13,6 +13,7 @@ interface Props {
   bookingId: number
   otherPartyName: string
   otherPartyAvatar?: string | null
+  initialDraft?: string
 }
 
 const props = defineProps<Props>()
@@ -22,7 +23,7 @@ const currentUserId = computed(() => Number((page.props.auth as any)?.user?.id ?
 
 const chat = useChat(props.bookingId, currentUserId.value)
 
-const body = ref('')
+const body = ref(props.initialDraft ?? '')
 const scrollContainer = ref<HTMLElement | null>(null)
 
 const displayName = computed(() => chat.otherParty.value?.name ?? props.otherPartyName)

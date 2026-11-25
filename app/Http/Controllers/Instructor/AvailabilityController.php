@@ -271,15 +271,23 @@ class AvailabilityController extends Controller
             'skill_level' => 'nullable|in:beginner,intermediate,advanced',
             'session_type' => 'nullable|in:teaching,guiding,coaching',
             'except_booking_id' => 'nullable|integer|exists:bookings,id',
+            'except_booking_ids' => 'nullable|array',
+            'except_booking_ids.*' => 'integer|exists:bookings,id',
+            'surf_spot_id' => 'nullable|integer|exists:surf_spots,id',
         ]);
 
         $date = \Carbon\Carbon::parse($validated['date']);
         $students = (int) ($validated['students'] ?? 1);
         [$skill, $sessionType] = $this->resolveSkillAndService($request, $validated);
-        $exceptBookingId = $this->resolveExceptBookingId($validated['except_booking_id'] ?? null, (int) $instructorId);
+        $exceptBookingIds = $this->resolveExceptBookingIds(
+            $validated['except_booking_id'] ?? null,
+            $validated['except_booking_ids'] ?? null,
+            (int) $instructorId
+        );
+        $surfSpotId = isset($validated['surf_spot_id']) ? (int) $validated['surf_spot_id'] : null;
 
         $availability = app(AvailabilityService::class);
-        $periods = $availability->periodsFor((int) $instructorId, $date, $students, $exceptBookingId, $skill, $sessionType);
+        $periods = $availability->periodsFor((int) $instructorId, $date, $students, $exceptBookingIds, $skill, $sessionType, $surfSpotId);
 
         $availableSlots = [];
         foreach ($periods as $value => $period) {
@@ -313,11 +321,19 @@ class AvailabilityController extends Controller
             'skill_level' => 'nullable|in:beginner,intermediate,advanced',
             'session_type' => 'nullable|in:teaching,guiding,coaching',
             'except_booking_id' => 'nullable|integer|exists:bookings,id',
+            'except_booking_ids' => 'nullable|array',
+            'except_booking_ids.*' => 'integer|exists:bookings,id',
+            'surf_spot_id' => 'nullable|integer|exists:surf_spots,id',
         ]);
 
         $students = (int) ($validated['students'] ?? 1);
         [$skill, $sessionType] = $this->resolveSkillAndService($request, $validated);
-        $exceptBookingId = $this->resolveExceptBookingId($validated['except_booking_id'] ?? null, (int) $instructorId);
+        $exceptBookingIds = $this->resolveExceptBookingIds(
+            $validated['except_booking_id'] ?? null,
+            $validated['except_booking_ids'] ?? null,
+            (int) $instructorId
+        );
+        $surfSpotId = isset($validated['surf_spot_id']) ? (int) $validated['surf_spot_id'] : null;
 
         $availability = app(AvailabilityService::class);
 
@@ -349,25 +365,47 @@ class AvailabilityController extends Controller
                 $start,
                 $days,
                 $students,
-                $exceptBookingId,
+                $exceptBookingIds,
                 $skill,
-                $sessionType
+                $sessionType,
+                $surfSpotId
             ),
         ]);
     }
 
-    private function resolveExceptBookingId(mixed $rawId, int $instructorId): ?int
+    /**
+     * @param  array<int, int|string>|null  $rawIds
+     * @return array<int, int>
+     */
+    private function resolveExceptBookingIds(mixed $rawId, ?array $rawIds, int $instructorId): array
     {
-        if (! $rawId) {
-            return null;
+        $ids = [];
+
+        if ($rawId) {
+            $ids[] = (int) $rawId;
         }
 
-        $booking = Booking::query()
-            ->whereKey((int) $rawId)
-            ->where('instructor_id', $instructorId)
-            ->first(['id']);
+        if (is_array($rawIds)) {
+            foreach ($rawIds as $id) {
+                if ((int) $id > 0) {
+                    $ids[] = (int) $id;
+                }
+            }
+        }
 
-        return $booking?->id;
+        $ids = array_values(array_unique(array_filter($ids, fn (int $id) => $id > 0)));
+
+        if (empty($ids)) {
+            return [];
+        }
+
+        return Booking::query()
+            ->whereIn('id', $ids)
+            ->where('instructor_id', $instructorId)
+            ->pluck('id')
+            ->map(fn ($id) => (int) $id)
+            ->values()
+            ->all();
     }
 
     /**

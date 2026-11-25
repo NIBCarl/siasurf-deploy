@@ -50,6 +50,13 @@ interface Booking {
   end_time?: string | null
   rescheduled_by_instructor_at?: string | null
   is_rescheduled?: boolean
+  pending_reschedule_proposal?: {
+    id: number
+    new_date: string | null
+    new_time_range: string
+    requires_admin_approval: boolean
+    reason: string | null
+  } | null
   status: string
   total_amount?: number
   payment_status?: string
@@ -159,6 +166,9 @@ const statusLabel = (status: string) => {
 }
 
 const nextBooking = computed(() => props.upcomingBookings[0] ?? null)
+const pendingRescheduleBookings = computed(() =>
+  props.upcomingBookings.filter((booking) => Boolean(booking.pending_reschedule_proposal)),
+)
 const remainingUpcoming = computed(() => props.upcomingBookings.slice(1, 4))
 const conditionsUnavailable = computed(() => props.surfReport.condition === 'Data Unavailable')
 
@@ -200,6 +210,32 @@ onUnmounted(() => {
         <template #header>Student overview</template>
 
         <div class="space-y-6">
+            <div
+                v-if="pendingRescheduleBookings.length > 0"
+                class="flex flex-col gap-3 rounded-panel border border-amber-300 bg-amber-50 p-4 sm:flex-row sm:items-center sm:justify-between"
+            >
+                <div>
+                    <p class="text-label font-semibold uppercase tracking-[0.06em] text-amber-800">
+                        Action needed · Reschedule requested
+                    </p>
+                    <p class="mt-0.5 text-body-sm font-semibold text-amber-950">
+                        {{ pendingRescheduleBookings[0].instructor.name }} proposed moving your lesson to
+                        {{ pendingRescheduleBookings[0].pending_reschedule_proposal?.new_date ? formatDate(pendingRescheduleBookings[0].pending_reschedule_proposal.new_date) : 'a new date' }}
+                        ({{ pendingRescheduleBookings[0].pending_reschedule_proposal?.new_time_range }}).
+                    </p>
+                    <p v-if="pendingRescheduleBookings.length > 1" class="mt-0.5 text-label text-amber-900">
+                        You also have {{ pendingRescheduleBookings.length - 1 }} more booking reschedule waiting for your reply.
+                    </p>
+                </div>
+                <AppButton
+                    :href="route('student.bookings.show', pendingRescheduleBookings[0].id)"
+                    size="sm"
+                    class="shrink-0"
+                >
+                    Review reschedule
+                </AppButton>
+            </div>
+
             <div
                 v-if="needsSkillAssessment"
                 class="flex flex-col gap-3 rounded-panel border border-amber-200 bg-amber-50 p-4 sm:flex-row sm:items-center sm:justify-between"

@@ -103,7 +103,7 @@ class RefundCalculatorService
         // Instructor-side cancellation, unsafe weather/sea conditions, suspension,
         // or student declining an instructor-initiated reschedule -> always 100% of lesson price.
         $isRescheduleDeclined = $reason === CancellationReason::RescheduleDeclined
-            || ($reason === CancellationReason::Student && $booking->hasPendingRescheduleResponse());
+            || ($reason === CancellationReason::Student && $booking->isEligibleForRescheduleDeclineRefund());
 
         if ($isRescheduleDeclined || $reason->isRefundable()) {
             $basis = match (true) {
@@ -191,7 +191,7 @@ class RefundCalculatorService
      */
     public function previewForStudent(Booking $booking): array
     {
-        $reason = $booking->hasPendingRescheduleResponse()
+        $reason = $booking->isEligibleForRescheduleDeclineRefund()
             ? CancellationReason::RescheduleDeclined
             : CancellationReason::Student;
 

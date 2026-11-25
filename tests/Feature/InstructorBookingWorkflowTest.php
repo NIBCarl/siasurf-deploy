@@ -371,7 +371,11 @@ class InstructorBookingWorkflowTest extends TestCase
             ->delete(route('instructor.bookings.change-request.cancel', $booking->id))
             ->assertRedirect();
 
-        $this->assertSame(0, $booking->changeRequests()->count());
+        $this->assertSame(0, $booking->changeRequests()->open()->count());
+        $this->assertDatabaseHas('booking_change_requests', [
+            'booking_id' => $booking->id,
+            'status' => ChangeRequestStatus::Rejected->value,
+        ]);
     }
 
     /** @test */

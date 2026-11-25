@@ -51,6 +51,7 @@ class ExpireBookingAcceptanceJob implements ShouldQueue
                 $booking->expireAcceptance(
                     'Waiver and checkout hold expired after ' . Booking::waiverHoldMinutes() . ' minutes.'
                 );
+                $booking->closeOpenChangeRequests('Closed automatically because the booking expired.');
                 $availabilityService->releaseForBooking($booking);
             });
 
@@ -64,6 +65,7 @@ class ExpireBookingAcceptanceJob implements ShouldQueue
 
         DB::transaction(function () use ($booking, $availabilityService) {
             $booking->expireAcceptance();
+            $booking->closeOpenChangeRequests('Closed automatically because the booking expired.');
 
             // Free the slot the pending request was holding.
             $availabilityService->releaseForBooking($booking);

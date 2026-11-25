@@ -32,6 +32,8 @@ const props = withDefaults(
         skillLevel?: string
         sessionType?: string
         exceptBookingId?: number | null
+        exceptBookingIds?: number[]
+        surfSpotId?: number | null
     }>(),
     {
         students: 1,
@@ -39,6 +41,8 @@ const props = withDefaults(
         skillLevel: undefined,
         sessionType: undefined,
         exceptBookingId: undefined,
+        exceptBookingIds: undefined,
+        surfSpotId: undefined,
     },
 )
 
@@ -206,7 +210,7 @@ async function load() {
     failed.value = false
 
     try {
-        const params: Record<string, string | number> = {
+        const params: Record<string, string | number | number[]> = {
             instructor: props.instructorId,
             start: toKey(cursor.value),
             days: 31,
@@ -215,6 +219,10 @@ async function load() {
         if (props.skillLevel) params.skill_level = props.skillLevel
         if (props.sessionType) params.session_type = props.sessionType
         if (props.exceptBookingId) params.except_booking_id = props.exceptBookingId
+        if (props.exceptBookingIds && props.exceptBookingIds.length > 0) {
+            params.except_booking_ids = props.exceptBookingIds
+        }
+        if (props.surfSpotId) params.surf_spot_id = props.surfSpotId
 
         const response = await fetch(
             route('api.availability.calendar', params),
@@ -234,7 +242,14 @@ async function load() {
 
 watch(cursor, load, { immediate: true })
 watch(
-    [() => props.students, () => props.skillLevel, () => props.sessionType, () => props.exceptBookingId],
+    [
+        () => props.students,
+        () => props.skillLevel,
+        () => props.sessionType,
+        () => props.exceptBookingId,
+        () => (props.exceptBookingIds ?? []).join(','),
+        () => props.surfSpotId,
+    ],
     () => {
         days.value = {}
         load()

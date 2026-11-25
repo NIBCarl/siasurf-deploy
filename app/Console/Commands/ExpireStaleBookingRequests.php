@@ -7,6 +7,7 @@ use App\Enums\PaymentStatus;
 use App\Jobs\ExpireBookingAcceptanceJob;
 use App\Jobs\ExpirePaymentWindowJob;
 use App\Models\Booking;
+use App\Services\BookingChangeService;
 use Illuminate\Console\Command;
 
 /**
@@ -68,7 +69,9 @@ class ExpireStaleBookingRequests extends Command
                 }
             });
 
-        $this->info("Queued {$expired} stale booking request(s) for expiry.");
+        $expiredProposals = app(BookingChangeService::class)->expireStaleProposals();
+
+        $this->info("Queued {$expired} stale booking request(s) for expiry and closed {$expiredProposals} expired reschedule proposal(s).");
 
         return self::SUCCESS;
     }

@@ -360,6 +360,8 @@ Route::middleware(['auth', 'verified', 'role:admin'])->prefix('admin')->as('admi
     Route::get('/change-requests', [AdminBookingController::class, 'changeRequests'])->name('change-requests.index');
     Route::post('/change-requests/{changeRequest}/approve', [AdminBookingController::class, 'approveChangeRequest'])->name('change-requests.approve');
     Route::post('/change-requests/{changeRequest}/reject', [AdminBookingController::class, 'rejectChangeRequest'])->name('change-requests.reject');
+    Route::post('/change-requests/batch/{batchId}/approve', [AdminBookingController::class, 'approveChangeRequestBatch'])->name('change-requests.batch.approve');
+    Route::post('/change-requests/batch/{batchId}/reject', [AdminBookingController::class, 'rejectChangeRequestBatch'])->name('change-requests.batch.reject');
 
     // Refund & cancellation oversight (ENT-12)
     Route::get('/refunds', [AdminRefundController::class, 'index'])->name('refunds.index');

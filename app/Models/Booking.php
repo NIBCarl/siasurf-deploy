@@ -107,6 +107,11 @@ class Booking extends Model
         return max(1, (int) config('siasurf.booking.change_approval_threshold_hours', self::CHANGE_APPROVAL_THRESHOLD_HOURS));
     }
 
+    public static function rescheduleProposalHours(): int
+    {
+        return max(1, (int) config('siasurf.booking.reschedule_proposal_hours', 24));
+    }
+
     public static function formatDurationMinutes(int $minutes): string
     {
         $minutes = max(1, $minutes);
@@ -518,6 +523,7 @@ class Booking extends Model
             return $this->changeRequests
                 ->where('type', \App\Enums\ChangeRequestType::Reschedule)
                 ->where('status', \App\Enums\ChangeRequestStatus::AwaitingStudent)
+                ->filter(fn (BookingChangeRequest $cr) => $cr->expires_at === null || $cr->expires_at->isFuture())
                 ->sortByDesc('id')
                 ->first();
         }
@@ -525,6 +531,7 @@ class Booking extends Model
         return $this->changeRequests()
             ->reschedule()
             ->awaitingStudent()
+            ->unexpired()
             ->latest('id')
             ->first();
     }
@@ -532,6 +539,41 @@ class Booking extends Model
     public function hasOpenRescheduleProposal(): bool
     {
         return $this->pendingRescheduleProposal() !== null;
+    }
+
+    public function isEligibleForRescheduleDeclineRefund(): bool
+    {
+        if ($this->hasPendingRescheduleResponse()) {
+            return true;
+        }
+
+        $latestReschedule = $this->relationLoaded('changeRequests')
+            ? $this->changeRequests
+                ->where('type', \App\Enums\ChangeRequestType::Reschedule)
+                ->sortByDesc('id')
+                ->first()
+            : $this->changeRequests()
+                ->reschedule()
+                ->latest('id')
+                ->first();
+
+        if (! $latestReschedule || $latestReschedule->student_declined_at === null) {
+            return false;
+        }
+
+        return $this->student_accepted_reschedule_at === null
+            || $this->student_accepted_reschedule_at->lt($latestReschedule->student_declined_at);
+    }
+
+    public function closeOpenChangeRequests(string $note): int
+    {
+        return $this->changeRequests()
+            ->open()
+            ->update([
+                'status' => \App\Enums\ChangeRequestStatus::Rejected->value,
+                'reviewed_at' => now(),
+                'admin_note' => $note,
+            ]);
     }
 
     public function isRescheduled(): bool
@@ -683,6 +725,10 @@ class Booking extends Model
      */
     public function canBeChanged(): bool
     {
+        if ($this->isInStudentCheckout()) {
+            return false;
+        }
+
         return in_array($this->status, BookingStatus::changeable(), true);
     }
 

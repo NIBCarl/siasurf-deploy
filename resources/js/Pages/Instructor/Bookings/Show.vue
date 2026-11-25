@@ -7,7 +7,8 @@ import StatusPill from '@/Components/UI/StatusPill.vue'
 import Modal from '@/Components/Modal.vue'
 import Dropdown from '@/Components/Dropdown.vue'
 import ChatBox from '@/Components/Organisms/ChatBox.vue'
-import RescheduleModal from '@/Components/Molecules/RescheduleModal.vue'
+import Countdown from '@/Components/UI/Countdown.vue'
+import RescheduleModal, { type SessionBookingOption } from '@/Components/Molecules/RescheduleModal.vue'
 import { formatPhilippineDate, formatPhilippineDateTime, formatPhilippineTime } from '@/utils/philippineTime'
 import {
   ArrowLeftIcon,
@@ -23,6 +24,7 @@ import {
   MapPinIcon,
   PhoneIcon,
   SparklesIcon,
+  UserGroupIcon,
 } from '@heroicons/vue/24/outline'
 import { StarIcon as StarIconSolid } from '@heroicons/vue/24/solid'
 
@@ -150,6 +152,7 @@ interface StudentAssessment {
 
 interface RescheduleProposal {
   id: number
+  batch_id?: string | null
   type: string
   status: string
   status_label: string
@@ -159,7 +162,36 @@ interface RescheduleProposal {
   original_time_range: string
   new_date: string | null
   new_time_range: string
+  expires_at?: string | null
+  expires_in_seconds?: number
   student_agreed_at: string | null
+}
+
+interface RescheduleBatchSummary {
+  batch_id: string
+  total: number
+  agreed_count: number
+  awaiting_student_count: number
+  awaiting_admin_count: number
+  declined_count: number
+  cancelled_count: number
+  expired_count: number
+  open_count: number
+  has_schedule_split: boolean
+  new_date: string | null
+  new_time_range: string
+  expires_at: string | null
+  expires_in_seconds: number
+  members: Array<{
+    booking_id: number
+    booking_ref: string
+    student_name: string
+    booking_status: string | null
+    request_id: number
+    request_status: string | null
+    state: string
+    show_url: string
+  }>
 }
 
 interface Props {
@@ -181,6 +213,8 @@ interface Props {
   hasConversation?: boolean
   isRescheduled?: boolean
   pendingRescheduleProposal?: RescheduleProposal | null
+  rescheduleBatch?: RescheduleBatchSummary | null
+  sessionBookings?: SessionBookingOption[]
   canChangeSurfSpot?: boolean
   sharedSessionCount?: number
   paymentHoldMinutes?: number
@@ -535,6 +569,7 @@ const submitDecline = () => {
 
 // Reschedule / Cancel modals
 const showRescheduleModal = ref(false)
+const rescheduleScopeSingle = ref(false)
 const showChangeModal = ref(false)
 const changeForm = useForm({
   type: 'cancellation' as 'cancellation',
@@ -542,8 +577,9 @@ const changeForm = useForm({
   reason: '',
 })
 
-const openChangeModal = (type: 'reschedule' | 'cancellation') => {
+const openChangeModal = (type: 'reschedule' | 'cancellation', singleOnly = false) => {
   if (type === 'reschedule') {
+    rescheduleScopeSingle.value = singleOnly
     showRescheduleModal.value = true
     return
   }
@@ -552,6 +588,36 @@ const openChangeModal = (type: 'reschedule' | 'cancellation') => {
   changeForm.type = 'cancellation'
   changeForm.cancellation_reason = 'instructor'
   showChangeModal.value = true
+}
+
+const proposalSecondsLeft = computed(() => {
+  const base = props.pendingRescheduleProposal?.expires_in_seconds ?? 0
+  if (base <= 0) return 0
+  const elapsed = Math.floor((nowTick.value - mountedAt) / 1000)
+  return Math.max(0, base - elapsed)
+})
+
+const sessionRosterLabel = (state?: string | null, status?: string): string => {
+  switch (state) {
+    case 'moved': return 'Rescheduled'
+    case 'awaiting_admin': return 'Agreed · Awaiting SISA'
+    case 'awaiting_student': return 'Awaiting reply'
+    case 'declined': return 'Declined (kept original)'
+    case 'expired': return 'Proposal expired'
+    case 'cancelled': return 'Cancelled'
+    default: return status ? status.replace(/_/g, ' ') : 'Scheduled'
+  }
+}
+
+const sessionRosterTone = (state?: string | null): string => {
+  switch (state) {
+    case 'moved': return 'chip-positive'
+    case 'awaiting_admin':
+    case 'awaiting_student': return 'chip-warning'
+    case 'declined':
+    case 'cancelled': return 'chip-critical'
+    default: return 'chip-neutral'
+  }
 }
 
 const submitChange = () => {
@@ -567,8 +633,10 @@ const pendingChangeRequest = computed(() =>
   props.booking.change_requests?.find((request) => ['pending', 'awaiting_student'].includes(request.status)),
 )
 
-const withdrawChange = () => {
-  router.delete(route('instructor.bookings.change-request.cancel', props.booking.id))
+const withdrawChange = (scope: 'single' | 'batch' = 'single') => {
+  router.delete(route('instructor.bookings.change-request.cancel', props.booking.id), {
+    data: scope === 'batch' ? { scope: 'batch' } : {},
+  })
 }
 
 const canChangeBooking = computed(() =>
@@ -1039,11 +1107,15 @@ const showCompleteAction = computed(
       >
         <div class="flex items-start gap-2">
           <ClockIcon class="mt-0.5 h-4 w-4 shrink-0 text-amber-600" aria-hidden="true" />
-          <div class="text-body-sm text-amber-950">
+          <div class="text-body-sm text-amber-950 space-y-1">
             <p class="font-semibold">
               Waiting for {{ booking.student.name }} to agree to reschedule
+              <span v-if="rescheduleBatch" class="ml-1.5 inline-flex items-center rounded-full bg-amber-200/70 px-2 py-0.5 text-label font-semibold">
+                Group: {{ rescheduleBatch.agreed_count }}/{{ rescheduleBatch.total }} agreed · {{ rescheduleBatch.awaiting_student_count }} awaiting
+                <template v-if="rescheduleBatch.declined_count > 0"> · {{ rescheduleBatch.declined_count }} declined</template>
+              </span>
             </p>
-            <p class="mt-0.5">
+            <p>
               Proposed:
               <strong>
                 {{ pendingRescheduleProposal.new_date ? formatPhilippineDate(pendingRescheduleProposal.new_date) : 'new date' }}
@@ -1051,11 +1123,22 @@ const showCompleteAction = computed(
               </strong>.
               Your reason was sent to Messages.
             </p>
+            <p v-if="proposalSecondsLeft > 0" class="text-label text-amber-900">
+              Proposal expires in <Countdown :seconds="proposalSecondsLeft" variant="inline" label="Proposal expires in" />
+            </p>
           </div>
         </div>
         <div class="flex flex-wrap gap-2 shrink-0">
           <AppButton size="sm" variant="secondary" @click="showChat = true">Message student</AppButton>
-          <AppButton size="sm" variant="secondary" @click="withdrawChange">Withdraw request</AppButton>
+          <AppButton size="sm" variant="secondary" @click="withdrawChange('single')">Withdraw this</AppButton>
+          <AppButton
+            v-if="(rescheduleBatch?.open_count ?? 0) > 1"
+            size="sm"
+            variant="danger"
+            @click="withdrawChange('batch')"
+          >
+            Withdraw all ({{ rescheduleBatch?.open_count }})
+          </AppButton>
         </div>
       </section>
 
@@ -1074,7 +1157,43 @@ const showCompleteAction = computed(
             </template>
           </p>
         </div>
-        <AppButton size="sm" variant="secondary" @click="withdrawChange">Withdraw request</AppButton>
+        <div class="flex flex-wrap gap-2 shrink-0">
+          <AppButton size="sm" variant="secondary" @click="withdrawChange('single')">Withdraw request</AppButton>
+          <AppButton
+            v-if="(rescheduleBatch?.open_count ?? 0) > 1"
+            size="sm"
+            variant="danger"
+            @click="withdrawChange('batch')"
+          >
+            Withdraw all ({{ rescheduleBatch?.open_count }})
+          </AppButton>
+        </div>
+      </section>
+
+      <!-- Split-schedule warning when group members disagreed on reschedule -->
+      <section
+        v-if="rescheduleBatch?.has_schedule_split"
+        class="flex flex-col gap-3 rounded-card border border-rose-200 bg-rose-50 p-4 sm:flex-row sm:items-center sm:justify-between"
+      >
+        <div class="flex items-start gap-2">
+          <ExclamationTriangleIcon class="mt-0.5 h-4 w-4 shrink-0 text-rose-600" aria-hidden="true" />
+          <div class="text-body-sm text-rose-950">
+            <p class="font-semibold">
+              Split schedule detected ({{ rescheduleBatch.agreed_count }} moved · {{ rescheduleBatch.declined_count }} kept original slot)
+            </p>
+            <p class="mt-0.5">
+              One or more surfers declined the new time and remain on the original slot. Propose a different time for the holdout or cancel with a 100% refund so you aren't double-booked.
+            </p>
+          </div>
+        </div>
+        <div v-if="canChangeBooking && !pendingChangeRequest" class="flex flex-wrap gap-2 shrink-0">
+          <AppButton size="sm" variant="secondary" @click="openChangeModal('reschedule', true)">
+            Propose another time
+          </AppButton>
+          <AppButton size="sm" variant="danger" @click="openChangeModal('cancellation')">
+            Cancel (100% refund)
+          </AppButton>
+        </div>
       </section>
 
       <!-- Four facts the instructor needs before walking to the water -->
@@ -1136,6 +1255,59 @@ const showCompleteAction = computed(
       <div class="grid grid-cols-1 gap-3 lg:grid-cols-12">
         <!-- Left: who is in the water and what they need -->
         <div class="space-y-3 lg:col-span-8">
+          <section v-if="(sessionBookings?.length ?? 0) > 1" class="surface p-4">
+            <div class="flex flex-wrap items-center justify-between gap-2 border-b border-sand-200 pb-3">
+              <div class="flex items-center gap-2">
+                <UserGroupIcon class="h-5 w-5 text-lagoon-700" aria-hidden="true" />
+                <h2 class="text-title font-semibold tracking-tight text-deep-950">
+                  Shared session roster ({{ sessionBookings?.length }} surfers)
+                </h2>
+              </div>
+              <AppButton
+                v-if="canChangeBooking"
+                size="sm"
+                variant="secondary"
+                @click="openChangeModal('reschedule', false)"
+              >
+                Reschedule session
+              </AppButton>
+            </div>
+            <div class="mt-3 divide-y divide-sand-200">
+              <div
+                v-for="member in sessionBookings"
+                :key="member.id"
+                class="flex flex-wrap items-center justify-between gap-2 py-2.5 first:pt-0 last:pb-0"
+              >
+                <div class="min-w-0">
+                  <p class="text-body-sm font-semibold text-deep-950">
+                    {{ member.student_name }}
+                    <span class="font-mono text-label font-normal text-stone-500">· {{ member.booking_ref }}</span>
+                    <span v-if="member.id === booking.id" class="ml-1 text-label font-semibold text-lagoon-700">(this booking)</span>
+                  </p>
+                  <p class="text-label text-stone-500">
+                    {{ member.duration_hours }}h · <span class="capitalize">{{ member.status.replace(/_/g, ' ') }}</span>
+                  </p>
+                </div>
+                <div class="flex items-center gap-2">
+                  <span
+                    v-if="member.latest_reschedule_state"
+                    class="chip"
+                    :class="sessionRosterTone(member.latest_reschedule_state)"
+                  >
+                    {{ sessionRosterLabel(member.latest_reschedule_state, member.status) }}
+                  </span>
+                  <Link
+                    v-if="member.id !== booking.id && member.show_url"
+                    :href="member.show_url"
+                    class="text-label font-semibold text-lagoon-700 hover:underline"
+                  >
+                    Open →
+                  </Link>
+                </div>
+              </div>
+            </div>
+          </section>
+
           <section class="surface p-4">
             <div class="flex flex-wrap items-center justify-between gap-2 border-b border-sand-200 pb-3">
               <h2 class="text-title font-semibold tracking-tight text-deep-950">Surfing party &amp; board match</h2>
@@ -1778,7 +1950,8 @@ const showCompleteAction = computed(
         :show="showRescheduleModal"
         :booking="booking"
         :requires-admin-approval="requiresAdminApprovalForChange"
-        @close="showRescheduleModal = false"
+        :session-bookings="rescheduleScopeSingle ? undefined : sessionBookings"
+        @close="showRescheduleModal = false; rescheduleScopeSingle = false"
       />
 
       <Modal :show="showChangeModal" @close="showChangeModal = false" maxWidth="lg">

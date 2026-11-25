@@ -11,6 +11,7 @@ use App\Enums\TimePeriod;
 use App\Exceptions\BookingRequestException;
 use App\Models\Availability;
 use App\Models\Booking;
+use App\Models\BookingChangeRequest;
 use App\Models\InstructorProfile;
 use App\Models\SurfSpot;
 use App\Models\User;
@@ -432,6 +433,7 @@ class AvailabilityService
 
         foreach ($expiredHolds as $booking) {
             $booking->expireAcceptance('Waiver and checkout hold expired after ' . Booking::waiverHoldMinutes() . ' minutes.');
+            $booking->closeOpenChangeRequests('Closed automatically because the booking expired.');
             $this->releaseForBooking($booking);
             $count++;
         }
@@ -459,6 +461,7 @@ class AvailabilityService
 
         foreach ($expiredHolds as $booking) {
             $booking->expireAcceptance('Waiver and checkout hold expired after ' . Booking::waiverHoldMinutes() . ' minutes.');
+            $booking->closeOpenChangeRequests('Closed automatically because the booking expired.');
             $this->releaseForBooking($booking);
             $count++;
         }
@@ -511,6 +514,7 @@ class AvailabilityService
                 }
 
                 $locked->markPaymentTimedOut();
+                $locked->closeOpenChangeRequests('Closed automatically because the booking expired.');
 
                 if ($locked->payment && $locked->payment->status === PaymentStatus::Pending) {
                     $locked->payment->update(['status' => PaymentStatus::Failed]);
@@ -557,13 +561,120 @@ class AvailabilityService
     }
 
     /**
-     * Every live booking on a date (the statuses that still hold a slot).
+     * Normalize single or array booking-exclusion IDs.
+     *
+     * @param  int|array<int, int|string>|null  $exceptBookingIds
+     * @return array<int, int>
      */
-    private function liveBookingsOnDate(int $instructorId, Carbon $day, ?int $exceptBookingId = null): Collection
+    private function normalizeBookingIds(int|array|null $exceptBookingIds): array
+    {
+        if ($exceptBookingIds === null) {
+            return [];
+        }
+
+        $ids = is_array($exceptBookingIds) ? $exceptBookingIds : [$exceptBookingIds];
+
+        return array_values(array_unique(array_filter(
+            array_map('intval', $ids),
+            fn (int $id) => $id > 0
+        )));
+    }
+
+    /**
+     * Lazily expire overdue reschedule proposals for an instructor so their
+     * virtual slot soft-holds are released immediately on read.
+     */
+    private function expireOverdueRescheduleProposals(int $instructorId): void
+    {
+        $hasExpired = BookingChangeRequest::query()
+            ->expiredProposals()
+            ->whereHas('booking', fn ($q) => $q->where('instructor_id', $instructorId))
+            ->exists();
+
+        if ($hasExpired) {
+            app(BookingChangeService::class)->expireStaleProposals($instructorId);
+        }
+    }
+
+    /**
+     * Convert an open, unexpired reschedule proposal into a transient Booking
+     * instance representing its virtual target-slot soft-hold.
+     */
+    private function toSoftHoldBooking(BookingChangeRequest $changeRequest): ?Booking
+    {
+        $booking = $changeRequest->booking;
+        if (! $booking || ! $changeRequest->new_date) {
+            return null;
+        }
+
+        $hold = new Booking();
+        $hold->forceFill([
+            'id' => $booking->id,
+            'instructor_id' => $booking->instructor_id,
+            'student_id' => $booking->student_id,
+            'surf_spot_id' => $booking->surf_spot_id,
+            'date' => $changeRequest->new_date->format('Y-m-d'),
+            'time_period' => $changeRequest->new_time_period,
+            'start_time' => $changeRequest->new_start_time?->format('H:i'),
+            'end_time' => $changeRequest->new_end_time?->format('H:i'),
+            'duration_hours' => $booking->resolvedDurationHours(),
+            'skill_level' => $booking->skill_level?->value ?? $booking->skill_level,
+            'session_type' => $booking->session_type?->value ?? $booking->session_type,
+            'student_count' => max(1, (int) $booking->student_count),
+            'status' => $booking->status?->value ?? $booking->status,
+        ]);
+
+        if ($booking->relationLoaded('surfSpot')) {
+            $hold->setRelation('surfSpot', $booking->surfSpot);
+        }
+
+        return $hold;
+    }
+
+    /**
+     * Virtual soft-holds from open, unexpired reschedule proposals targeting `$day`.
+     *
+     * @param  array<int, int>  $exceptIds
+     * @return Collection<int, Booking>
+     */
+    private function rescheduleHoldEntriesOnDate(int $instructorId, Carbon $day, array $exceptIds = []): Collection
+    {
+        $this->expireOverdueRescheduleProposals($instructorId);
+
+        $holdingStatuses = array_map(
+            fn (BookingStatus $status) => $status->value,
+            BookingStatus::slotHolding()
+        );
+
+        return BookingChangeRequest::query()
+            ->with(['booking.surfSpot'])
+            ->reschedule()
+            ->open()
+            ->unexpired()
+            ->whereDate('new_date', $day->format('Y-m-d'))
+            ->when(! empty($exceptIds), fn ($query) => $query->whereNotIn('booking_id', $exceptIds))
+            ->whereHas('booking', function ($query) use ($instructorId, $holdingStatuses) {
+                $query->where('instructor_id', $instructorId)
+                    ->whereIn('status', $holdingStatuses);
+            })
+            ->get()
+            ->map(fn (BookingChangeRequest $cr) => $this->toSoftHoldBooking($cr))
+            ->filter()
+            ->values();
+    }
+
+    /**
+     * Every live booking on a date (the statuses that still hold a slot),
+     * merged with virtual soft-holds from unexpired reschedule proposals.
+     *
+     * @param  int|array<int, int>|null  $exceptBookingIds
+     */
+    private function liveBookingsOnDate(int $instructorId, Carbon $day, int|array|null $exceptBookingIds = null): Collection
     {
         $this->releaseExpiredCheckoutHolds($instructorId);
+        $exceptIds = $this->normalizeBookingIds($exceptBookingIds);
 
-        return Booking::query()
+        $live = Booking::query()
             ->with('surfSpot')
             ->where('instructor_id', $instructorId)
             ->whereDate('date', $day->format('Y-m-d'))
@@ -571,8 +682,12 @@ class AvailabilityService
                 fn (BookingStatus $status) => $status->value,
                 BookingStatus::slotHolding()
             ))
-            ->when($exceptBookingId, fn ($query) => $query->where('id', '!=', $exceptBookingId))
+            ->when(! empty($exceptIds), fn ($query) => $query->whereNotIn('id', $exceptIds))
             ->get();
+
+        $holds = $this->rescheduleHoldEntriesOnDate($instructorId, $day, $exceptIds);
+
+        return $live->concat($holds)->values();
     }
 
     /**
@@ -624,19 +739,21 @@ class AvailabilityService
 
     /**
      * Live bookings that overlap the given half-open range [start, end).
+     *
+     * @param  int|array<int, int>|null  $exceptBookingIds
      */
     public function bookingsInRange(
         int $instructorId,
         Carbon|string $date,
         string $startTime,
         string $endTime,
-        ?int $exceptBookingId = null
+        int|array|null $exceptBookingIds = null
     ): Collection {
         $day = $date instanceof Carbon ? $date->copy() : Carbon::parse($date);
         $start = $this->timeString($startTime) ?? (string) $startTime;
         $end = $this->timeString($endTime) ?? (string) $endTime;
 
-        return $this->liveBookingsOnDate($instructorId, $day, $exceptBookingId)
+        return $this->liveBookingsOnDate($instructorId, $day, $exceptBookingIds)
             ->filter(function (Booking $booking) use ($start, $end) {
                 $range = $this->bookingRange($booking);
 
@@ -647,15 +764,18 @@ class AvailabilityService
 
     /**
      * Students already booked into a range.
+     *
+     * @param  int|array<int, int>|null  $exceptBookingIds
      */
     public function bookedStudentsInRange(
         int $instructorId,
         Carbon|string $date,
         string $startTime,
         string $endTime,
-        ?int $exceptBookingId = null
+        int|array|null $exceptBookingIds = null
     ): int {
-        return (int) $this->bookingsInRange($instructorId, $date, $startTime, $endTime, $exceptBookingId)
+        return (int) $this->bookingsInRange($instructorId, $date, $startTime, $endTime, $exceptBookingIds)
+            ->unique('id')
             ->sum(fn (Booking $booking) => $this->studentsIn($booking));
     }
 
@@ -664,20 +784,22 @@ class AvailabilityService
      *
      * Level 1 returns zero as soon as any live booking overlaps: the slot is
      * exclusive while a request is pending.
+     *
+     * @param  int|array<int, int>|null  $exceptBookingIds
      */
     public function remainingCapacity(
         int $instructorId,
         Carbon|string $date,
         string $startTime,
         string $endTime,
-        ?int $exceptBookingId = null,
+        int|array|null $exceptBookingIds = null,
         ?SkillLevel $skill = null,
         ?SessionType $sessionType = null,
         ?int $surfSpotId = null
     ): int {
         $level = $this->instructorLevel($instructorId);
         $capacity = $this->slotCapacity($instructorId, $skill);
-        $overlapping = $this->bookingsInRange($instructorId, $date, $startTime, $endTime, $exceptBookingId);
+        $overlapping = $this->bookingsInRange($instructorId, $date, $startTime, $endTime, $exceptBookingIds);
 
         return $this->remainingCapacityWithin($overlapping, $level, $capacity, $startTime, $endTime, $skill, $sessionType, $surfSpotId);
     }
@@ -785,7 +907,9 @@ class AvailabilityService
                     ? $level->maxStudentsFor($firstExistingSkill)
                     : $capacity;
 
-                $booked = (int) $hourBookings->sum(fn (Booking $booking) => $this->studentsIn($booking));
+                $booked = (int) $hourBookings
+                    ->unique('id')
+                    ->sum(fn (Booking $booking) => $this->studentsIn($booking));
                 $hourRemaining = max(0, $effectiveCapacity - $booked);
             }
 
@@ -828,12 +952,12 @@ class AvailabilityService
         Carbon $day,
         string $start,
         string $end,
-        ?int $exceptBookingId,
+        int|array|null $exceptBookingIds,
         ?SkillLevel $skill,
         ?SessionType $sessionType,
         ?int $surfSpotId = null
     ): ?string {
-        $overlapping = $this->bookingsInRange($instructorId, $day, $start, $end, $exceptBookingId);
+        $overlapping = $this->bookingsInRange($instructorId, $day, $start, $end, $exceptBookingIds);
 
         if ($overlapping->isEmpty()) {
             return null;
@@ -895,9 +1019,9 @@ class AvailabilityService
         Carbon|string $date,
         string $startTime,
         string $endTime,
-        ?int $exceptBookingId = null
+        int|array|null $exceptBookingIds = null
     ): ?SurfSpot {
-        $overlapping = $this->bookingsInRange($instructorId, $date, $startTime, $endTime, $exceptBookingId);
+        $overlapping = $this->bookingsInRange($instructorId, $date, $startTime, $endTime, $exceptBookingIds);
 
         if ($overlapping->isEmpty()) {
             return null;
@@ -978,6 +1102,36 @@ class AvailabilityService
     }
 
     /**
+     * Virtual soft-holds from open, unexpired reschedule proposals in `[from, to]`.
+     *
+     * @param  array<int, int>  $exceptIds
+     * @return Collection<int, Booking>
+     */
+    private function rescheduleHoldEntriesInRange(int $instructorId, Carbon $from, Carbon $to, array $exceptIds = []): Collection
+    {
+        $holdingStatuses = array_map(
+            fn (BookingStatus $status) => $status->value,
+            BookingStatus::slotHolding()
+        );
+
+        return BookingChangeRequest::query()
+            ->with(['booking.surfSpot'])
+            ->reschedule()
+            ->open()
+            ->unexpired()
+            ->whereBetween('new_date', [$from->format('Y-m-d'), $to->format('Y-m-d')])
+            ->when(! empty($exceptIds), fn ($query) => $query->whereNotIn('booking_id', $exceptIds))
+            ->whereHas('booking', function ($query) use ($instructorId, $holdingStatuses) {
+                $query->where('instructor_id', $instructorId)
+                    ->whereIn('status', $holdingStatuses);
+            })
+            ->get()
+            ->map(fn (BookingChangeRequest $cr) => $this->toSoftHoldBooking($cr))
+            ->filter()
+            ->values();
+    }
+
+    /**
      * Day-by-day availability for a date range, in a bounded number of queries.
      *
      * `periodsFor()` is one date per call. A month grid would need ~42 calls
@@ -989,6 +1143,7 @@ class AvailabilityService
      * start, not the start times themselves. The student still calls
      * periodsFor() for the day they actually pick.
      *
+     * @param  int|array<int, int>|null  $exceptBookingIds
      * @return array<string, array<string, array{available: bool, reason: ?string, remaining_capacity: int}>>
      */
     public function availabilityByDay(
@@ -996,11 +1151,14 @@ class AvailabilityService
         Carbon|string $start,
         int $days = 60,
         int $students = 1,
-        ?int $exceptBookingId = null,
+        int|array|null $exceptBookingIds = null,
         ?SkillLevel $skill = null,
-        ?SessionType $sessionType = null
+        ?SessionType $sessionType = null,
+        ?int $surfSpotId = null
     ): array {
         $this->releaseExpiredCheckoutHolds($instructorId);
+        $this->expireOverdueRescheduleProposals($instructorId);
+        $exceptIds = $this->normalizeBookingIds($exceptBookingIds);
 
         $from = ($start instanceof Carbon ? $start->copy() : Carbon::parse($start))->startOfDay();
         $days = max(1, min($days, 120));
@@ -1042,7 +1200,7 @@ class AvailabilityService
             ->map(fn ($rows) => $rows->map(fn ($row) => $periodValue($row->time_period))->all())
             ->all();
 
-        // 3. Live bookings holding slots in the range, keyed by date.
+        // 3. Live bookings holding slots in the range + reschedule soft-holds, keyed by date.
         $liveBookings = Booking::query()
             ->with(['instructor', 'surfSpot'])
             ->where('instructor_id', $instructorId)
@@ -1051,8 +1209,9 @@ class AvailabilityService
                 fn (BookingStatus $status) => $status->value,
                 BookingStatus::slotHolding()
             ))
-            ->when($exceptBookingId, fn ($query) => $query->where('id', '!=', $exceptBookingId))
+            ->when(! empty($exceptIds), fn ($query) => $query->whereNotIn('id', $exceptIds))
             ->get()
+            ->concat($this->rescheduleHoldEntriesInRange($instructorId, $from, $to, $exceptIds))
             ->groupBy(fn (Booking $booking) => $this->dateOf($booking));
 
         $level = $this->instructorLevel($instructorId);
@@ -1132,7 +1291,8 @@ class AvailabilityService
                             $candidate,
                             $slotEnd,
                             $skill,
-                            $sessionType
+                            $sessionType,
+                            $surfSpotId
                         );
 
                         if ($slotRemaining > $bestRemaining) {
@@ -1249,9 +1409,10 @@ class AvailabilityService
         int $instructorId,
         Carbon|string $date,
         int $students = 1,
-        ?int $exceptBookingId = null,
+        int|array|null $exceptBookingIds = null,
         ?SkillLevel $skill = null,
-        ?SessionType $sessionType = null
+        ?SessionType $sessionType = null,
+        ?int $surfSpotId = null
     ): array {
         $day = $date instanceof Carbon ? $date->copy() : Carbon::parse($date);
         $dateString = $day->format('Y-m-d');
@@ -1311,15 +1472,15 @@ class AvailabilityService
             // the instructor's remaining student capacity inside
             // bookableStartTimes().
             $slots = $reason === null
-                ? $this->bookableStartTimes($instructorId, $day, $value, $students, $exceptBookingId, $skill, $sessionType)
+                ? $this->bookableStartTimes($instructorId, $day, $value, $students, $exceptBookingIds, $skill, $sessionType, $surfSpotId)
                 : [];
 
             $reservedSlots = $reason === null
-                ? $this->reservedStartTimes($instructorId, $day, $value, $students, $exceptBookingId, $skill, $sessionType)
+                ? $this->reservedStartTimes($instructorId, $day, $value, $students, $exceptBookingIds, $skill, $sessionType, $surfSpotId)
                 : [];
 
             $reservedSlotDetails = $reason === null && ! empty($reservedSlots)
-                ? $this->reservedSlotDetails($instructorId, $day, $reservedSlots, $exceptBookingId, $skill, $sessionType, $minimumMinutes)
+                ? $this->reservedSlotDetails($instructorId, $day, $reservedSlots, $exceptBookingIds, $skill, $sessionType, $minimumMinutes)
                 : [];
 
             if ($reason === null && empty($slots)) {
@@ -1339,9 +1500,10 @@ class AvailabilityService
                     $day,
                     $slots[0],
                     Carbon::createFromFormat('H:i', $slots[0])->addMinutes($minimumMinutes)->format('H:i'),
-                    $exceptBookingId,
+                    $exceptBookingIds,
                     $skill,
                     $sessionType,
+                    $surfSpotId
                 );
 
             $result[$value] = [
@@ -1356,9 +1518,10 @@ class AvailabilityService
                         $day,
                         $slotTime,
                         Carbon::createFromFormat('H:i', $slotTime)->addMinutes($minimumMinutes)->format('H:i'),
-                        $exceptBookingId,
+                        $exceptBookingIds,
                         $skill,
                         $sessionType,
+                        $surfSpotId
                     ),
                 ])->all() : [],
                 // Lesson length the student will actually book by default
@@ -1384,9 +1547,10 @@ class AvailabilityService
         Carbon|string $date,
         string $timePeriod,
         int $students = 1,
-        ?int $exceptBookingId = null,
+        int|array|null $exceptBookingIds = null,
         ?SkillLevel $skill = null,
-        ?SessionType $sessionType = null
+        ?SessionType $sessionType = null,
+        ?int $surfSpotId = null
     ): array {
         $day = $date instanceof Carbon ? $date->copy() : Carbon::parse($date);
         $period = TimePeriod::tryFrom($timePeriod);
@@ -1408,7 +1572,7 @@ class AvailabilityService
 
         $level = $this->instructorLevel($instructorId);
         $capacity = $this->slotCapacity($instructorId, $skill);
-        $liveBookings = $this->liveBookingsOnDate($instructorId, $day, $exceptBookingId);
+        $liveBookings = $this->liveBookingsOnDate($instructorId, $day, $exceptBookingIds);
         $requested = max(1, $students);
 
         $slots = [];
@@ -1426,7 +1590,7 @@ class AvailabilityService
             // Capacity is measured across the full minimum lesson window.
             $slotEnd = $slotStart->copy()->addMinutes($minimumMinutes)->format('H:i');
 
-            if ($this->remainingCapacityWithin($liveBookings, $level, $capacity, $time, $slotEnd, $skill, $sessionType) < $requested) {
+            if ($this->remainingCapacityWithin($liveBookings, $level, $capacity, $time, $slotEnd, $skill, $sessionType, $surfSpotId) < $requested) {
                 continue;
             }
 
@@ -1440,6 +1604,7 @@ class AvailabilityService
      * Hourly start times inside a period that already have a live booking
      * leaving insufficient room for the requested party, skill, or service.
      *
+     * @param  int|array<int, int>|null  $exceptBookingIds
      * @return array<int, string>
      */
     public function reservedStartTimes(
@@ -1447,9 +1612,10 @@ class AvailabilityService
         Carbon|string $date,
         string $timePeriod,
         int $students = 1,
-        ?int $exceptBookingId = null,
+        int|array|null $exceptBookingIds = null,
         ?SkillLevel $skill = null,
-        ?SessionType $sessionType = null
+        ?SessionType $sessionType = null,
+        ?int $surfSpotId = null
     ): array {
         $day = $date instanceof Carbon ? $date->copy() : Carbon::parse($date);
         $period = TimePeriod::tryFrom($timePeriod);
@@ -1458,7 +1624,7 @@ class AvailabilityService
             return [];
         }
 
-        $liveBookings = $this->liveBookingsOnDate($instructorId, $day, $exceptBookingId);
+        $liveBookings = $this->liveBookingsOnDate($instructorId, $day, $exceptBookingIds);
 
         if ($liveBookings->isEmpty()) {
             return [];
@@ -1501,7 +1667,7 @@ class AvailabilityService
                 continue;
             }
 
-            if ($this->remainingCapacityWithin($liveBookings, $level, $capacity, $time, $slotEnd, $skill, $sessionType) < $requested) {
+            if ($this->remainingCapacityWithin($liveBookings, $level, $capacity, $time, $slotEnd, $skill, $sessionType, $surfSpotId) < $requested) {
                 $reserved[] = $time;
             }
         }
@@ -1514,18 +1680,19 @@ class AvailabilityService
      * a full slot from a cross-skill / cross-service lock or seat limit.
      *
      * @param  array<int, string>  $reservedSlots
+     * @param  int|array<int, int>|null  $exceptBookingIds
      * @return array<string, array{reason_code: string, existing_skill: ?string, existing_service: ?string, label: string, short_label: string}>
      */
     private function reservedSlotDetails(
         int $instructorId,
         Carbon $day,
         array $reservedSlots,
-        ?int $exceptBookingId,
+        int|array|null $exceptBookingIds,
         ?SkillLevel $skill,
         ?SessionType $sessionType,
         int $minimumMinutes
     ): array {
-        $liveBookings = $this->liveBookingsOnDate($instructorId, $day, $exceptBookingId);
+        $liveBookings = $this->liveBookingsOnDate($instructorId, $day, $exceptBookingIds);
         $level = $this->instructorLevel($instructorId);
         $capacity = $this->slotCapacity($instructorId, $skill);
         $details = [];
@@ -1650,9 +1817,10 @@ class AvailabilityService
         Carbon|string $date,
         string $startTime,
         int $students = 1,
-        ?int $exceptBookingId = null,
+        int|array|null $exceptBookingIds = null,
         ?SkillLevel $skill = null,
-        ?SessionType $sessionType = null
+        ?SessionType $sessionType = null,
+        ?int $surfSpotId = null
     ): array {
         $day = $date instanceof Carbon ? $date->copy() : Carbon::parse($date);
         $start = $this->timeString($startTime);
@@ -1682,7 +1850,7 @@ class AvailabilityService
 
         $level = $this->instructorLevel($instructorId);
         $capacity = $this->slotCapacity($instructorId, $skill);
-        $liveBookings = $this->liveBookingsOnDate($instructorId, $day, $exceptBookingId);
+        $liveBookings = $this->liveBookingsOnDate($instructorId, $day, $exceptBookingIds);
         $requested = max(1, $students);
 
         $ends = [];
@@ -1700,7 +1868,7 @@ class AvailabilityService
                 break;
             }
 
-            if ($this->remainingCapacityWithin($liveBookings, $level, $capacity, $start, $end, $skill, $sessionType) < $requested) {
+            if ($this->remainingCapacityWithin($liveBookings, $level, $capacity, $start, $end, $skill, $sessionType, $surfSpotId) < $requested) {
                 break;
             }
 
@@ -1712,32 +1880,153 @@ class AvailabilityService
     }
 
     /**
-     * Automated reschedule start-time picker for an existing booking.
+     * Validate a shared start time for a single booking or a group of sibling
+     * bookings, respecting each booking's preserved duration_hours and combined
+     * hourly seat demand.
      *
-     * Excludes the booking itself, preserves its exact duration_hours, skill
-     * level, and session type, and derives end_time + time_period automatically.
+     * @param  Collection<int, Booking>  $targets
+     */
+    public function groupStartBookabilityReason(
+        Collection $targets,
+        Carbon|string $date,
+        string $startTime,
+        ?int $surfSpotId = null
+    ): ?string {
+        if ($targets->isEmpty()) {
+            return 'Select at least one booking to reschedule.';
+        }
+
+        $day = $date instanceof Carbon ? $date->copy() : Carbon::parse($date);
+        $start = $this->timeString($startTime);
+
+        if ($start === null) {
+            return 'Choose a valid start time for the lesson.';
+        }
+
+        /** @var Booking $primary */
+        $primary = $targets->first();
+        $instructorId = (int) $primary->instructor_id;
+        $exceptIds = $targets->pluck('id')->map(fn ($id) => (int) $id)->values()->all();
+        $skill = $this->skillOf($primary);
+        $sessionType = $this->sessionTypeOf($primary);
+        $spotId = $surfSpotId ?? ($primary->surf_spot_id ? (int) $primary->surf_spot_id : null);
+
+        foreach ($targets as $target) {
+            $targetEnd = Carbon::createFromFormat('H:i', $start)
+                ->addHours($target->resolvedDurationHours())
+                ->format('H:i');
+
+            $reason = $this->rangeBookabilityReason(
+                $instructorId,
+                $day,
+                $start,
+                $targetEnd,
+                $this->studentsIn($target),
+                $exceptIds,
+                $this->skillOf($target) ?? $skill,
+                $this->sessionTypeOf($target) ?? $sessionType,
+                $target->surf_spot_id ? (int) $target->surf_spot_id : $spotId
+            );
+
+            if ($reason !== null) {
+                return $reason;
+            }
+        }
+
+        if ($targets->count() === 1) {
+            return null;
+        }
+
+        $maxDuration = max(1, (int) $targets->max(fn (Booking $b) => $b->resolvedDurationHours()));
+        $maxEnd = Carbon::createFromFormat('H:i', $start)->addHours($maxDuration)->format('H:i');
+        $overlapping = $this->bookingsInRange($instructorId, $day, $start, $maxEnd, $exceptIds);
+        $level = $this->instructorLevel($instructorId);
+        $capacity = $skill !== null ? $level->maxStudentsFor($skill) : $this->slotCapacity($instructorId, $skill);
+
+        $cursor = Carbon::createFromFormat('H:i', $start);
+        $finish = Carbon::createFromFormat('H:i', $maxEnd);
+
+        while ($cursor->lessThan($finish)) {
+            $next = $cursor->copy()->addHour();
+            if ($next->greaterThan($finish)) {
+                $next = $finish->copy();
+            }
+
+            $hStart = $cursor->format('H:i');
+            $hEnd = $next->format('H:i');
+
+            $movingSeats = (int) $targets
+                ->filter(function (Booking $b) use ($start, $hStart) {
+                    $bEnd = Carbon::createFromFormat('H:i', $start)
+                        ->addHours($b->resolvedDurationHours())
+                        ->format('H:i');
+
+                    return $bEnd > $hStart;
+                })
+                ->sum(fn (Booking $b) => $this->studentsIn($b));
+
+            $remaining = $this->remainingCapacityWithin(
+                $overlapping,
+                $level,
+                $capacity,
+                $hStart,
+                $hEnd,
+                $skill,
+                $sessionType,
+                $spotId
+            );
+
+            if ($remaining < $movingSeats) {
+                if ($remaining === 0) {
+                    return 'This time slot is already reserved by another student. Please choose another time.';
+                }
+
+                return sprintf(
+                    'Only %d %s left in that time slot for your selected group.',
+                    $remaining,
+                    $remaining === 1 ? 'spot is' : 'spots are'
+                );
+            }
+
+            $cursor = $next;
+        }
+
+        return null;
+    }
+
+    /**
+     * Automated reschedule start-time picker for an existing booking or session group.
      *
+     * Excludes the target booking(s), preserves each booking's exact duration_hours,
+     * skill level, and session type, and derives end_time + time_period automatically.
+     *
+     * @param  Collection<int, Booking>|null  $targetBookings
      * @return array<string, mixed>
      */
-    public function rescheduleStartTimes(Booking $booking, Carbon|string $date): array
+    public function rescheduleStartTimes(Booking $booking, Carbon|string $date, ?Collection $targetBookings = null): array
     {
+        $targets = ($targetBookings !== null && $targetBookings->isNotEmpty())
+            ? $targetBookings->values()
+            : collect([$booking]);
+
         $day = $date instanceof Carbon ? $date->copy() : Carbon::parse($date);
         $dateString = $day->format('Y-m-d');
         $durationHours = $booking->resolvedDurationHours();
-        $students = max(1, (int) ($booking->student_count ?: 1));
+        $maxDurationHours = max(1, (int) $targets->max(fn (Booking $b) => $b->resolvedDurationHours()));
+        $totalStudents = max(1, (int) $targets->sum(fn (Booking $b) => $this->studentsIn($b)));
+        $exceptIds = $targets->pluck('id')->map(fn ($id) => (int) $id)->values()->all();
         $skill = $this->skillOf($booking);
         $sessionType = $this->sessionTypeOf($booking);
-
-        $currentDate = $this->dateOf($booking);
-        $currentStart = $this->timeString($booking->start_time);
+        $surfSpotId = $booking->surf_spot_id ? (int) $booking->surf_spot_id : null;
 
         $rawPeriods = $this->periodsFor(
             $booking->instructor_id,
             $day,
-            $students,
-            $booking->id,
+            $totalStudents,
+            $exceptIds,
             $skill,
-            $sessionType
+            $sessionType,
+            $surfSpotId
         );
 
         $periods = [];
@@ -1750,27 +2039,19 @@ class AvailabilityService
 
             if ($periodData['available'] && ! empty($periodData['slots'])) {
                 foreach ($periodData['slots'] as $startTime) {
+                    if ($this->groupStartBookabilityReason($targets, $day, $startTime, $surfSpotId) !== null) {
+                        continue;
+                    }
+
                     $endTime = Carbon::createFromFormat('H:i', $startTime)
                         ->addHours($durationHours)
                         ->format('H:i');
 
-                    $reason = $this->rangeBookabilityReason(
-                        $booking->instructor_id,
-                        $day,
-                        $startTime,
-                        $endTime,
-                        $students,
-                        $booking->id,
-                        $skill,
-                        $sessionType,
-                        $booking->surf_spot_id ? (int) $booking->surf_spot_id : null
-                    );
+                    $isCurrent = $targets->every(function (Booking $b) use ($dateString, $startTime) {
+                        return $this->dateOf($b) === $dateString
+                            && $this->timeString($b->start_time) === $startTime;
+                    });
 
-                    if ($reason !== null) {
-                        continue;
-                    }
-
-                    $isCurrent = $dateString === $currentDate && $startTime === $currentStart;
                     $slots[] = [
                         'start_time' => $startTime,
                         'end_time' => $endTime,
@@ -1788,7 +2069,7 @@ class AvailabilityService
 
             $reason = $periodData['reason'];
             if ($reason === null && empty($slots)) {
-                $reason = "No {$durationHours}-hour start times are open during the " . strtolower($period->label()) . ' on this date.';
+                $reason = "No {$maxDurationHours}-hour start times are open during the " . strtolower($period->label()) . ' on this date.';
             }
 
             $periods[$key] = [
@@ -1802,6 +2083,9 @@ class AvailabilityService
             'date' => $dateString,
             'day_label' => $day->format('l, M d, Y'),
             'duration_hours' => $durationHours,
+            'max_duration_hours' => $maxDurationHours,
+            'group_size' => $targets->count(),
+            'total_students' => $totalStudents,
             'periods' => $periods,
             'has_any_slot' => $hasAnySlot,
         ];
@@ -1810,6 +2094,7 @@ class AvailabilityService
     /**
      * Explain why a chosen start time has no bookable end times.
      *
+     * @param  int|array<int, int>|null  $exceptBookingIds
      * @return array{is_reserved: bool, reason: string}
      */
     public function unavailableStartReason(
@@ -1817,7 +2102,7 @@ class AvailabilityService
         Carbon|string $date,
         string $startTime,
         int $students = 1,
-        ?int $exceptBookingId = null,
+        int|array|null $exceptBookingIds = null,
         ?SkillLevel $skill = null,
         ?SessionType $sessionType = null
     ): array {
@@ -1843,10 +2128,10 @@ class AvailabilityService
             ];
         }
 
-        $overlapping = $this->bookingsInRange($instructorId, $day, $start, $minimumEnd, $exceptBookingId);
+        $overlapping = $this->bookingsInRange($instructorId, $day, $start, $minimumEnd, $exceptBookingIds);
 
         if ($overlapping->isNotEmpty()) {
-            if (($mismatch = $this->slotMismatchReason($instructorId, $day, $start, $minimumEnd, $exceptBookingId, $skill, $sessionType)) !== null) {
+            if (($mismatch = $this->slotMismatchReason($instructorId, $day, $start, $minimumEnd, $exceptBookingIds, $skill, $sessionType)) !== null) {
                 return [
                     'is_reserved' => true,
                     'reason' => $mismatch,
@@ -2180,6 +2465,8 @@ class AvailabilityService
      *
      * A null return means the range is bookable. The booking flow converts a
      * non-null answer into a BookingRequestException.
+     *
+     * @param  int|array<int, int>|null  $exceptBookingIds
      */
     public function rangeBookabilityReason(
         int $instructorId,
@@ -2187,7 +2474,7 @@ class AvailabilityService
         string $startTime,
         string $endTime,
         int $students = 1,
-        ?int $exceptBookingId = null,
+        int|array|null $exceptBookingIds = null,
         ?SkillLevel $skill = null,
         ?SessionType $sessionType = null,
         ?int $surfSpotId = null
@@ -2224,7 +2511,8 @@ class AvailabilityService
         $minutes = Carbon::createFromFormat('H:i', $start)
             ->diffInMinutes(Carbon::createFromFormat('H:i', $end));
 
-        $minimumMinutes = $exceptBookingId !== null
+        $hasExclusions = ! empty($this->normalizeBookingIds($exceptBookingIds));
+        $minimumMinutes = $hasExclusions
             ? 60
             : $this->minimumLessonMinutes($sessionType, $skill);
 
@@ -2254,7 +2542,7 @@ class AvailabilityService
             return 'A lesson cannot cross from morning into afternoon. Please shorten the session.';
         }
 
-        $periods = $this->periodsFor($instructorId, $day, $students, $exceptBookingId, $skill, $sessionType);
+        $periods = $this->periodsFor($instructorId, $day, $students, $exceptBookingIds, $skill, $sessionType, $surfSpotId);
         $verdict = $periods[$period->value] ?? null;
 
         if (!$verdict) {
@@ -2262,7 +2550,7 @@ class AvailabilityService
         }
 
         if (!$verdict['available']) {
-            if (($mismatch = $this->slotMismatchReason($instructorId, $day, $start, $end, $exceptBookingId, $skill, $sessionType, $surfSpotId)) !== null) {
+            if (($mismatch = $this->slotMismatchReason($instructorId, $day, $start, $end, $exceptBookingIds, $skill, $sessionType, $surfSpotId)) !== null) {
                 return $mismatch;
             }
 
@@ -2293,10 +2581,10 @@ class AvailabilityService
         }
 
         $requested = max(1, $students);
-        $remaining = $this->remainingCapacity($instructorId, $day, $start, $end, $exceptBookingId, $skill, $sessionType, $surfSpotId);
+        $remaining = $this->remainingCapacity($instructorId, $day, $start, $end, $exceptBookingIds, $skill, $sessionType, $surfSpotId);
 
         if ($remaining < $requested) {
-            if (($mismatch = $this->slotMismatchReason($instructorId, $day, $start, $end, $exceptBookingId, $skill, $sessionType, $surfSpotId)) !== null) {
+            if (($mismatch = $this->slotMismatchReason($instructorId, $day, $start, $end, $exceptBookingIds, $skill, $sessionType, $surfSpotId)) !== null) {
                 return $mismatch;
             }
 
@@ -2332,6 +2620,7 @@ class AvailabilityService
      * Throwing wrapper for a concrete start/end range. This is what the booking
      * form uses now that the student chooses both ends of the lesson.
      *
+     * @param  int|array<int, int>|null  $exceptBookingIds
      * @throws BookingRequestException
      */
     public function assertRangeIsBookable(
@@ -2340,7 +2629,7 @@ class AvailabilityService
         string $startTime,
         string $endTime,
         int $students = 1,
-        ?int $exceptBookingId = null,
+        int|array|null $exceptBookingIds = null,
         ?SkillLevel $skill = null,
         ?SessionType $sessionType = null,
         ?int $surfSpotId = null
@@ -2351,7 +2640,7 @@ class AvailabilityService
             $startTime,
             $endTime,
             $students,
-            $exceptBookingId,
+            $exceptBookingIds,
             $skill,
             $sessionType,
             $surfSpotId
@@ -2481,6 +2770,7 @@ class AvailabilityService
                 'surfSpot:id,name',
                 'waivers:id,booking_id,type',
                 'payment:id,booking_id,payment_method,status',
+                'changeRequests',
             ])
             ->withCount('participants')
             ->where('instructor_id', $instructorId)
@@ -2577,6 +2867,8 @@ class AvailabilityService
 
                 return [
                     'id' => $booking->id,
+                    'instructor_id' => $booking->instructor_id,
+                    'surf_spot_id' => $booking->surf_spot_id,
                     'booking_ref' => '#SURF-' . str_pad((string) $booking->id, 5, '0', STR_PAD_LEFT),
                     'student_name' => $booking->student?->name ?? 'Student',
                     'surf_spot_name' => $booking->surfSpot?->name ?? 'Spot to confirm',
@@ -2595,6 +2887,9 @@ class AvailabilityService
                     'duration_hours' => $durationHours,
                     'status' => $status,
                     'is_reserved' => $isReserved,
+                    'can_be_changed' => $booking->canBeChanged(),
+                    'has_pending_change_request' => $booking->changeRequests->contains(fn ($cr) => $cr->isOpen()),
+                    'requires_admin_approval_for_change' => $booking->changeRequiresAdminApproval(),
                     'waiver_signed' => $waiverSigned,
                     'payment_method' => $booking->payment?->payment_method?->value,
                     'payment_status' => $booking->payment?->status?->value,

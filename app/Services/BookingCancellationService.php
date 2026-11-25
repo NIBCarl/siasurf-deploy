@@ -79,7 +79,7 @@ class BookingCancellationService
                 );
             }
 
-            $effectiveReason = ($reason === CancellationReason::Student && $locked->hasPendingRescheduleResponse())
+            $effectiveReason = ($reason === CancellationReason::Student && $locked->isEligibleForRescheduleDeclineRefund())
                 ? CancellationReason::RescheduleDeclined
                 : $reason;
 
@@ -102,6 +102,8 @@ class BookingCancellationService
                 'payment_deadline_at' => null,
                 'accept_deadline_at' => null,
             ]);
+
+            $locked->closeOpenChangeRequests('Closed automatically because the booking was cancelled.');
 
             $this->availabilityService->releaseSlot($instructorId, $date, $period, $locked->id);
 
