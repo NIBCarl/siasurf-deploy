@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { Head, Link, router } from '@inertiajs/vue3'
+import { Head, Link, router, usePage } from '@inertiajs/vue3'
 import AppSidebarLayout from '@/Layouts/AppSidebarLayout.vue'
 import BookingStepper from '@/Components/Molecules/BookingStepper.vue'
 import BaseButton from '@/Components/Atoms/BaseButton.vue'
@@ -68,6 +68,8 @@ interface Props {
 }
 
 const props = defineProps<Props>()
+const page = usePage()
+const paymentHoldMinutes = computed(() => Number((page.props as any).bookingPolicy?.paymentHoldMinutes ?? 15))
 
 const copiedSlotLink = ref(false)
 const copySlotShareLink = async () => {
@@ -595,7 +597,7 @@ onBeforeUnmount(() => {
                 Please arrive at the spot 15 minutes before your session starts for a safety briefing.
               </span>
               <span v-else-if="isAwaitingPayment">
-                Your instructor has approved this lesson! Complete your payment within the 15-minute window to lock in your confirmation.
+                Your instructor has approved this lesson! Complete your payment within the {{ paymentHoldMinutes }}-minute window to lock in your confirmation.
               </span>
               <span v-else-if="isPendingInstructor">
                 Keep this page open or check "My Bookings" — your payment button will unlock as soon as {{ booking.instructor.name }} accepts.

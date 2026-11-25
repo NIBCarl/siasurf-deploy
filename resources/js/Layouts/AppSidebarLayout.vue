@@ -131,6 +131,7 @@ const adminGroups: NavGroup[] = [
             { name: 'Incidents', href: route('admin.incidents.index'), icon: ExclamationTriangleIcon, pattern: 'admin.incidents.*' },
             { name: 'Appeals', href: route('admin.appeals.index'), icon: ChatBubbleLeftRightIcon, pattern: 'admin.appeals.*' },
             { name: 'Skill upgrades', href: route('admin.skill-upgrades.index'), icon: AcademicCapIcon, pattern: 'admin.skill-upgrades.*' },
+            { name: 'System settings', href: route('admin.settings.index'), icon: Cog6ToothIcon, pattern: 'admin.settings.*' },
         ],
     },
 ];

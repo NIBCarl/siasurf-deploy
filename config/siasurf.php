@@ -87,6 +87,11 @@ return [
 
     'booking' => [
         'horizon_days' => (int) env('SIASURF_BOOKING_HORIZON_DAYS', 60),
+        'request_cutoff_minutes' => (int) env('SIASURF_REQUEST_CUTOFF_MINUTES', 60),
+        'accept_window_hours' => (int) env('SIASURF_ACCEPT_WINDOW_HOURS', 2),
+        'waiver_hold_minutes' => (int) env('SIASURF_WAIVER_HOLD_MINUTES', 15),
+        'payment_hold_minutes' => (int) env('SIASURF_PAYMENT_HOLD_MINUTES', 15),
+        'change_approval_threshold_hours' => (int) env('SIASURF_CHANGE_APPROVAL_THRESHOLD_HOURS', 24),
     ],
 
     /*
@@ -177,6 +182,23 @@ return [
         'tier3_suspension_days' => (int) env('SIASURF_SUSPENSION_DAYS', 30),
         'threshold' => env('SIASURF_STRIKE_THRESHOLD', 3),
         'suspension_days' => env('SIASURF_SUSPENSION_DAYS', 30),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Incident Severity & Checklist Mapping (FR 1.23)
+    |--------------------------------------------------------------------------
+    |
+    | Maps each private concern severity tier (and optional per-category
+    | overrides) to the SISA-only suggested IncidentOutcome.
+    |
+    */
+
+    'incident_severity_mapping' => [
+        'minor' => env('SIASURF_SEVERITY_MINOR_OUTCOME', '1_strike'),
+        'major' => env('SIASURF_SEVERITY_MAJOR_OUTCOME', '2_strikes'),
+        'critical' => env('SIASURF_SEVERITY_CRITICAL_OUTCOME', 'critical'),
+        'category_overrides' => [],
     ],
 
     /*

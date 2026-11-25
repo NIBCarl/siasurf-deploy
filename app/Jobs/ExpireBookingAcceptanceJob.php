@@ -49,7 +49,7 @@ class ExpireBookingAcceptanceJob implements ShouldQueue
 
             DB::transaction(function () use ($booking, $availabilityService) {
                 $booking->expireAcceptance(
-                    'Waiver and checkout hold expired after ' . Booking::CHECKOUT_HOLD_MINUTES . ' minutes.'
+                    'Waiver and checkout hold expired after ' . Booking::waiverHoldMinutes() . ' minutes.'
                 );
                 $availabilityService->releaseForBooking($booking);
             });
@@ -83,7 +83,7 @@ class ExpireBookingAcceptanceJob implements ShouldQueue
                 $party?->notify(new BookingDeclinedNotification($booking, true));
             }
 
-            Log::info("Booking #{$booking->id} expired - instructor did not respond within " . Booking::ACCEPT_WINDOW_HOURS . ' hours.');
+            Log::info("Booking #{$booking->id} expired - instructor did not respond within " . Booking::acceptWindowHours() . ' hours.');
         });
     }
 }

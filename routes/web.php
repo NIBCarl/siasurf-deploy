@@ -8,6 +8,7 @@ use App\Http\Controllers\Admin\IncidentController;
 use App\Http\Controllers\Admin\InstructorController;
 use App\Http\Controllers\Admin\PayoutController as AdminPayoutController;
 use App\Http\Controllers\Admin\RefundController as AdminRefundController;
+use App\Http\Controllers\Admin\SettingsController;
 use App\Http\Controllers\Admin\SkillUpgradeController;
 use App\Http\Controllers\Admin\StudentController;
 use App\Http\Controllers\Admin\SurfSpotController as AdminSurfSpotController;
@@ -401,6 +402,11 @@ Route::middleware(['auth', 'verified', 'role:admin'])->prefix('admin')->as('admi
     Route::post('/surf-spots', [AdminSurfSpotController::class, 'store'])->name('surf-spots.store');
     Route::put('/surf-spots/{surfSpot}', [AdminSurfSpotController::class, 'update'])->name('surf-spots.update');
     Route::delete('/surf-spots/{surfSpot}', [AdminSurfSpotController::class, 'destroy'])->name('surf-spots.destroy');
+
+    // Rates, fees & system settings (FR 1.18, FR 1.23)
+    Route::get('/settings', [SettingsController::class, 'index'])->name('settings.index');
+    Route::put('/settings', [SettingsController::class, 'update'])->name('settings.update');
+    Route::post('/settings/reset', [SettingsController::class, 'reset'])->name('settings.reset');
 
     // Review moderation
     Route::post('/reviews/{review}/moderate', [ReviewController::class, 'moderate'])->name('reviews.moderate');

@@ -330,11 +330,11 @@ class WaiverController extends Controller
                 ->with('success', 'Liability waiver signed successfully.');
         } catch (\RuntimeException $e) {
             if ($e->getMessage() === 'HOLD_EXPIRED') {
-                $booking->expireAcceptance('Waiver and checkout hold expired after '.Booking::CHECKOUT_HOLD_MINUTES.' minutes.');
+                $booking->expireAcceptance('Waiver and checkout hold expired after '.Booking::waiverHoldMinutes().' minutes.');
                 app(AvailabilityService::class)->releaseForBooking($booking);
 
                 return redirect()->route('bookings.create', $booking->instructor_id)
-                    ->with('error', 'Your 15-minute reservation hold expired. Please select your time slot again.');
+                    ->with('error', 'Your '.Booking::waiverHoldMinutes().'-minute reservation hold expired. Please select your time slot again.');
             }
 
             if ($e->getMessage() === 'BOOKING_CLOSED') {
@@ -694,11 +694,11 @@ class WaiverController extends Controller
                 ->with('success', 'Parental consent recorded. A signed PDF copy has been emailed to the parent/guardian.');
         } catch (\RuntimeException $e) {
             if ($e->getMessage() === 'HOLD_EXPIRED') {
-                $booking->expireAcceptance('Waiver and checkout hold expired after '.Booking::CHECKOUT_HOLD_MINUTES.' minutes.');
+                $booking->expireAcceptance('Waiver and checkout hold expired after '.Booking::waiverHoldMinutes().' minutes.');
                 app(AvailabilityService::class)->releaseForBooking($booking);
 
                 return redirect()->route('bookings.create', $booking->instructor_id)
-                    ->with('error', 'Your 15-minute reservation hold expired. Please select your time slot again.');
+                    ->with('error', 'Your '.Booking::waiverHoldMinutes().'-minute reservation hold expired. Please select your time slot again.');
             }
 
             if ($e->getMessage() === 'BOOKING_CLOSED') {
@@ -748,11 +748,11 @@ class WaiverController extends Controller
     private function ensureCheckoutOpen(Booking $booking): ?RedirectResponse
     {
         if ($booking->checkoutHoldExpired()) {
-            $booking->expireAcceptance('Waiver and checkout hold expired after '.Booking::CHECKOUT_HOLD_MINUTES.' minutes.');
+            $booking->expireAcceptance('Waiver and checkout hold expired after '.Booking::waiverHoldMinutes().' minutes.');
             app(AvailabilityService::class)->releaseForBooking($booking);
 
             return redirect()->route('bookings.create', $booking->instructor_id)
-                ->with('error', 'Your 15-minute reservation hold expired. Please select your time slot again.');
+                ->with('error', 'Your '.Booking::waiverHoldMinutes().'-minute reservation hold expired. Please select your time slot again.');
         }
 
         if ($booking->isCancelled() || $booking->isExpired()) {

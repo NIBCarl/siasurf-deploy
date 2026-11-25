@@ -18,6 +18,7 @@ use App\Models\Certificate;
 use App\Models\InstructorProfile;
 use App\Models\Review;
 use App\Models\SafetyIncident;
+use App\Models\Setting;
 use App\Models\SurfSpot;
 use App\Models\User;
 use App\Observers\BookingObserver;
@@ -25,6 +26,7 @@ use App\Observers\SafetyIncidentObserver;
 use App\Contracts\PaymentServiceInterface;
 use App\Services\MockPaymentService;
 use App\Services\PayMongoPaymentService;
+use App\Services\SystemSettingsService;
 use App\Services\XenditPaymentService;
 
 class AppServiceProvider extends ServiceProvider
@@ -34,6 +36,8 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
+        $this->app->singleton(SystemSettingsService::class);
+
         // Bind PaymentServiceInterface based on configuration
         $this->app->bind(PaymentServiceInterface::class, function ($app) {
             if (! empty(config('services.xendit.secret_key'))) {
@@ -56,6 +60,18 @@ class AppServiceProvider extends ServiceProvider
         if (config('app.force_https')) {
             URL::forceScheme('https');
         }
+
+        app(SystemSettingsService::class)->applyToConfig();
+
+        $refreshSettings = static function (): void {
+            $service = app(SystemSettingsService::class);
+            if (! $service->shouldSuppressModelEvents()) {
+                $service->flushAndApply();
+            }
+        };
+
+        Setting::saved($refreshSettings);
+        Setting::deleted($refreshSettings);
 
         Vite::prefetch(concurrency: 3);
 

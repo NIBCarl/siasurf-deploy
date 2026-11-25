@@ -82,6 +82,51 @@ class Booking extends Model
         return self::standardHours() * 60;
     }
 
+    public static function requestCutoffMinutes(): int
+    {
+        return max(15, (int) config('siasurf.booking.request_cutoff_minutes', self::PRE_LESSON_BUFFER_HOURS * 60));
+    }
+
+    public static function acceptWindowHours(): int
+    {
+        return max(1, (int) config('siasurf.booking.accept_window_hours', self::ACCEPT_WINDOW_HOURS));
+    }
+
+    public static function waiverHoldMinutes(): int
+    {
+        return max(5, (int) config('siasurf.booking.waiver_hold_minutes', self::CHECKOUT_HOLD_MINUTES));
+    }
+
+    public static function paymentHoldMinutes(): int
+    {
+        return max(5, (int) config('siasurf.booking.payment_hold_minutes', self::PAYMENT_HOLD_MINUTES));
+    }
+
+    public static function changeApprovalThresholdHours(): int
+    {
+        return max(1, (int) config('siasurf.booking.change_approval_threshold_hours', self::CHANGE_APPROVAL_THRESHOLD_HOURS));
+    }
+
+    public static function formatDurationMinutes(int $minutes): string
+    {
+        $minutes = max(1, $minutes);
+
+        if ($minutes % 60 === 0) {
+            $hours = intdiv($minutes, 60);
+
+            return $hours.' '.($hours === 1 ? 'hour' : 'hours');
+        }
+
+        if ($minutes > 60) {
+            $hours = intdiv($minutes, 60);
+            $rem = $minutes % 60;
+
+            return $hours.' '.($hours === 1 ? 'hour' : 'hours').' '.$rem.' '.($rem === 1 ? 'minute' : 'minutes');
+        }
+
+        return $minutes.' '.($minutes === 1 ? 'minute' : 'minutes');
+    }
+
     protected $fillable = [
         'student_id',
         'instructor_id',
@@ -726,7 +771,7 @@ class Booking extends Model
             return true;
         }
 
-        return $hours < self::CHANGE_APPROVAL_THRESHOLD_HOURS;
+        return $hours < self::changeApprovalThresholdHours();
     }
 
     public function hasPendingChangeRequest(): bool
@@ -767,7 +812,7 @@ class Booking extends Model
         $this->update([
             'status' => BookingStatus::Expired,
             'declined_at' => now(),
-            'decline_reason' => $reason ?? 'No instructor response within ' . self::ACCEPT_WINDOW_HOURS . ' hours.',
+            'decline_reason' => $reason ?? 'No instructor response within ' . self::acceptWindowHours() . ' hours.',
         ]);
     }
 
@@ -879,7 +924,7 @@ class Booking extends Model
             return null;
         }
 
-        return $lessonStart->copy()->subHours(self::PRE_LESSON_BUFFER_HOURS);
+        return $lessonStart->copy()->subMinutes(self::requestCutoffMinutes());
     }
 
     /**
@@ -917,7 +962,7 @@ class Booking extends Model
      */
     public function acceptDeadlineFrom(?\DateTimeInterface $from = null): \Carbon\Carbon
     {
-        $deadline = \Carbon\Carbon::instance($from ?? now())->addHours(self::ACCEPT_WINDOW_HOURS);
+        $deadline = \Carbon\Carbon::instance($from ?? now())->addHours(self::acceptWindowHours());
 
         return $this->clampToLessonStart($deadline);
     }
@@ -929,7 +974,7 @@ class Booking extends Model
      */
     public function paymentDeadlineFrom(?\DateTimeInterface $from = null): \Carbon\Carbon
     {
-        $deadline = \Carbon\Carbon::instance($from ?? now())->addMinutes(self::PAYMENT_HOLD_MINUTES);
+        $deadline = \Carbon\Carbon::instance($from ?? now())->addMinutes(self::paymentHoldMinutes());
 
         return $this->clampToLessonStart($deadline);
     }
@@ -940,7 +985,7 @@ class Booking extends Model
      */
     public function checkoutDeadlineFrom(?\DateTimeInterface $from = null): \Carbon\Carbon
     {
-        $deadline = \Carbon\Carbon::instance($from ?? now())->addMinutes(self::CHECKOUT_HOLD_MINUTES);
+        $deadline = \Carbon\Carbon::instance($from ?? now())->addMinutes(self::waiverHoldMinutes());
 
         return $this->clampToLessonStart($deadline);
     }
@@ -958,7 +1003,7 @@ class Booking extends Model
         }
 
         return now()->greaterThanOrEqualTo(
-            $lessonStart->copy()->subHours(self::PRE_LESSON_BUFFER_HOURS)
+            $lessonStart->copy()->subMinutes(self::requestCutoffMinutes())
         );
     }
 

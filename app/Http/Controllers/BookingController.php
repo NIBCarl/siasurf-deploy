@@ -673,11 +673,11 @@ class BookingController extends Controller
         Gate::authorize('view', $booking);
 
         if ($booking->checkoutHoldExpired()) {
-            $booking->expireAcceptance('Waiver and checkout hold expired after ' . Booking::CHECKOUT_HOLD_MINUTES . ' minutes.');
+            $booking->expireAcceptance('Waiver and checkout hold expired after ' . Booking::waiverHoldMinutes() . ' minutes.');
             $this->availabilityService->releaseForBooking($booking);
 
             return redirect()->route('bookings.create', $booking->instructor_id)
-                ->with('error', 'Your 15-minute reservation hold expired. Please select your time slot again.');
+                ->with('error', 'Your ' . Booking::waiverHoldMinutes() . '-minute reservation hold expired. Please select your time slot again.');
         }
 
         if ($booking->status === BookingStatus::AwaitingPayment) {
@@ -730,7 +730,7 @@ class BookingController extends Controller
                 ->firstOrFail();
 
             if ($locked->checkoutHoldExpired()) {
-                $locked->expireAcceptance('Waiver and checkout hold expired after '.Booking::CHECKOUT_HOLD_MINUTES.' minutes.');
+                $locked->expireAcceptance('Waiver and checkout hold expired after '.Booking::waiverHoldMinutes().' minutes.');
                 $this->availabilityService->releaseForBooking($locked);
 
                 return ['result' => 'expired', 'booking' => $locked];
@@ -821,7 +821,7 @@ class BookingController extends Controller
 
                     // FR 1.9.3 - auto-release the request if the instructor stays silent.
                     ExpireBookingAcceptanceJob::dispatch($fresh)
-                        ->delay($fresh->accept_deadline_at ?? now()->addHours(Booking::ACCEPT_WINDOW_HOURS));
+                        ->delay($fresh->accept_deadline_at ?? now()->addHours(Booking::acceptWindowHours()));
                 });
             }
 
@@ -830,7 +830,7 @@ class BookingController extends Controller
 
         if ($outcome['result'] === 'expired') {
             return redirect()->route('bookings.create', $outcome['booking']->instructor_id)
-                ->with('error', 'Your 15-minute reservation hold expired. Please select your time slot again.');
+                ->with('error', 'Your ' . Booking::waiverHoldMinutes() . '-minute reservation hold expired. Please select your time slot again.');
         }
 
         if ($outcome['result'] === 'slot_conflict') {
@@ -855,7 +855,7 @@ class BookingController extends Controller
         }
 
         $acceptSuccessMessage = 'Booking request sent! Your instructor has '
-            . Booking::ACCEPT_WINDOW_HOURS . ' hours to accept.';
+            . Booking::acceptWindowHours() . ' hours to accept.';
 
         if ($booking->isDeadlineClampedToCutoff($booking->accept_deadline_at)) {
             $cutoff = $booking->bookingCutoffAt();
@@ -947,7 +947,7 @@ class BookingController extends Controller
         if ($accepted->status === BookingStatus::AwaitingPayment) {
             return redirect()->route('student.bookings.show', $accepted->id)
                 ->with('success', 'Instant Book confirmed! You have '
-                    . Booking::PAYMENT_HOLD_MINUTES . ' minutes to complete payment.');
+                    . Booking::paymentHoldMinutes() . ' minutes to complete payment.');
         }
 
         return redirect()->route('bookings.confirmation', $accepted->id)
@@ -1076,7 +1076,7 @@ class BookingController extends Controller
         Gate::authorize('view', $booking);
 
         if ($booking->checkoutHoldExpired()) {
-            $booking->expireAcceptance('Waiver and checkout hold expired after ' . Booking::CHECKOUT_HOLD_MINUTES . ' minutes.');
+            $booking->expireAcceptance('Waiver and checkout hold expired after ' . Booking::waiverHoldMinutes() . ' minutes.');
             $this->availabilityService->releaseForBooking($booking);
             $booking->refresh();
         }

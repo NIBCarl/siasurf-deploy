@@ -431,7 +431,7 @@ class AvailabilityService
             ->get();
 
         foreach ($expiredHolds as $booking) {
-            $booking->expireAcceptance('Waiver and checkout hold expired after ' . Booking::CHECKOUT_HOLD_MINUTES . ' minutes.');
+            $booking->expireAcceptance('Waiver and checkout hold expired after ' . Booking::waiverHoldMinutes() . ' minutes.');
             $this->releaseForBooking($booking);
             $count++;
         }
@@ -458,7 +458,7 @@ class AvailabilityService
             ->get();
 
         foreach ($expiredHolds as $booking) {
-            $booking->expireAcceptance('Waiver and checkout hold expired after ' . Booking::CHECKOUT_HOLD_MINUTES . ' minutes.');
+            $booking->expireAcceptance('Waiver and checkout hold expired after ' . Booking::waiverHoldMinutes() . ' minutes.');
             $this->releaseForBooking($booking);
             $count++;
         }
@@ -1091,7 +1091,7 @@ class AvailabilityService
                     // start here was wrong: at 08:00 the 06:00 period start is
                     // inside the buffer, so the calendar closed the whole
                     // morning even though 10:00 and 11:00 were bookable.
-                    $cutOff = now()->addHours(Booking::PRE_LESSON_BUFFER_HOURS);
+                    $cutOff = now()->addMinutes(Booking::requestCutoffMinutes());
                     $settings = $this->scheduleSettings($instructorId, $day, $period);
 
                     $survivingStarts = $this->slotsInRange(
@@ -1113,7 +1113,7 @@ class AvailabilityService
 
                     if ($afterCutOffStarts === []) {
                         $reason = 'Too soon to book — lessons need at least '
-                            . Booking::PRE_LESSON_BUFFER_HOURS . ' hour of lead time.';
+                            . Booking::formatDurationMinutes(Booking::requestCutoffMinutes()) . ' of lead time.';
                     }
                 }
 
@@ -1413,7 +1413,7 @@ class AvailabilityService
 
         $slots = [];
         // A lesson needs at least this much lead time before it starts.
-        $cutOff = now()->addHours(Booking::PRE_LESSON_BUFFER_HOURS);
+        $cutOff = now()->addMinutes(Booking::requestCutoffMinutes());
 
         foreach ($candidateSlots as $time) {
             [$hour, $minute] = array_map('intval', explode(':', $time));
@@ -1477,7 +1477,7 @@ class AvailabilityService
         $level = $this->instructorLevel($instructorId);
         $capacity = $this->slotCapacity($instructorId, $skill);
         $requested = max(1, $students);
-        $cutOff = now()->addHours(Booking::PRE_LESSON_BUFFER_HOURS);
+        $cutOff = now()->addMinutes(Booking::requestCutoffMinutes());
 
         $reserved = [];
 
@@ -2216,9 +2216,9 @@ class AvailabilityService
         [$startHour, $startMinute] = array_map('intval', explode(':', $start));
         $slotStart = $day->copy()->startOfDay()->setTime($startHour, $startMinute);
 
-        if ($slotStart->lessThanOrEqualTo(now()->addHours(Booking::PRE_LESSON_BUFFER_HOURS))) {
+        if ($slotStart->lessThanOrEqualTo(now()->addMinutes(Booking::requestCutoffMinutes()))) {
             return 'Too soon to book — lessons need at least '
-                . Booking::PRE_LESSON_BUFFER_HOURS . ' hour of lead time.';
+                . Booking::formatDurationMinutes(Booking::requestCutoffMinutes()) . ' of lead time.';
         }
 
         $minutes = Carbon::createFromFormat('H:i', $start)

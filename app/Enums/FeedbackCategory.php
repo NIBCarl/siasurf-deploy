@@ -169,6 +169,12 @@ enum FeedbackCategory: string
 
     public function suggestedSeverity(): ?IncidentSeverity
     {
+        $outcome = $this->suggestedOutcome();
+
+        if ($outcome !== null) {
+            return $outcome->severity();
+        }
+
         return match ($this->group()) {
             'minor' => IncidentSeverity::Minor,
             'major' => IncidentSeverity::Major,
@@ -179,7 +185,30 @@ enum FeedbackCategory: string
 
     public function suggestedOutcome(): ?IncidentOutcome
     {
-        return match ($this->group()) {
+        if (! $this->isConcern()) {
+            return null;
+        }
+
+        $overrides = config('siasurf.incident_severity_mapping.category_overrides', []);
+        if (is_array($overrides) && isset($overrides[$this->value]) && is_string($overrides[$this->value])) {
+            $mapped = IncidentOutcome::tryFrom($overrides[$this->value]);
+            if ($mapped !== null) {
+                return $mapped;
+            }
+        }
+
+        $group = $this->group();
+        if (in_array($group, ['minor', 'major', 'critical'], true)) {
+            $configured = config("siasurf.incident_severity_mapping.{$group}");
+            if (is_string($configured)) {
+                $mapped = IncidentOutcome::tryFrom($configured);
+                if ($mapped !== null) {
+                    return $mapped;
+                }
+            }
+        }
+
+        return match ($group) {
             'minor' => IncidentOutcome::OneStrike,
             'major' => IncidentOutcome::TwoStrikes,
             'critical' => IncidentOutcome::Critical,

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
-import { Head, useForm } from '@inertiajs/vue3'
+import { Head, useForm, usePage } from '@inertiajs/vue3'
 import axios from 'axios'
 import AppSidebarLayout from '@/Layouts/AppSidebarLayout.vue'
 import BookingStepper from '@/Components/Molecules/BookingStepper.vue'
@@ -86,6 +86,8 @@ interface Props {
 }
 
 const props = defineProps<Props>()
+const page = usePage()
+const waiverHoldMinutes = computed(() => Number((page.props as any).bookingPolicy?.waiverHoldMinutes ?? 15))
 
 const signaturePadRef = ref<InstanceType<typeof SignaturePad> | null>(null)
 const hasDrawnSignature = ref(false)
@@ -360,7 +362,7 @@ const goBack = () => {
                 held until <strong>{{ bookingCutoffLabel }}</strong> (1 hour before lesson start)
               </template>
               <template v-else>
-                held for 15 minutes
+                held for {{ waiverHoldMinutes }} minutes
               </template>
               while you complete this waiver and payment step.
             </p>

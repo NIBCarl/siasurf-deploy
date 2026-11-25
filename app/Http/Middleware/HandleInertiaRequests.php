@@ -62,6 +62,13 @@ class HandleInertiaRequests extends Middleware
                 'maxRatePerHour' => PricingService::maxRatePerHour(),
                 'rangeLabel' => PricingService::rateRangeLabel(),
                 'services' => PricingService::serviceRateBands(),
+                'serviceFeePercent' => PricingService::serviceFeePercent(),
+            ],
+            'bookingPolicy' => [
+                'requestCutoffMinutes' => \App\Models\Booking::requestCutoffMinutes(),
+                'acceptWindowHours' => \App\Models\Booking::acceptWindowHours(),
+                'waiverHoldMinutes' => \App\Models\Booking::waiverHoldMinutes(),
+                'paymentHoldMinutes' => \App\Models\Booking::paymentHoldMinutes(),
             ],
             // Real counts for the sidebar badges. Nothing is invented: each value
             // is a direct query against this instructor's own records.

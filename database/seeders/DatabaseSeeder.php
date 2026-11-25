@@ -23,6 +23,9 @@ class DatabaseSeeder extends Seeder
             
             // 3. Create surf spots (needed for bookings)
             SurfSpotSeeder::class,
+
+            // 4. Seed baseline SISA system settings (idempotent)
+            SystemSettingsSeeder::class,
             
             // Optional: Uncomment for demo data
             // InstructorSeeder::class,
