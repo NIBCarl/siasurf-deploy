@@ -17,11 +17,11 @@ class InstructorStatusLog extends Model
 
     public function instructor(): BelongsTo
     {
-        return $this->belongsTo(User::class, 'instructor_id');
+        return $this->belongsTo(User::class, 'instructor_id')->withTrashed();
     }
 
     public function changedBy(): BelongsTo
     {
-        return $this->belongsTo(User::class, 'changed_by');
+        return $this->belongsTo(User::class, 'changed_by')->withTrashed();
     }
 }

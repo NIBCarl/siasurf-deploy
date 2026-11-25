@@ -40,17 +40,17 @@ class InstructorSuspension extends Model
 
     public function instructor(): BelongsTo
     {
-        return $this->belongsTo(User::class, 'instructor_id');
+        return $this->belongsTo(User::class, 'instructor_id')->withTrashed();
     }
 
     public function suspendedBy(): BelongsTo
     {
-        return $this->belongsTo(User::class, 'suspended_by');
+        return $this->belongsTo(User::class, 'suspended_by')->withTrashed();
     }
 
     public function reinstatedBy(): BelongsTo
     {
-        return $this->belongsTo(User::class, 'reinstated_by');
+        return $this->belongsTo(User::class, 'reinstated_by')->withTrashed();
     }
 
     public function triggeringIncident(): BelongsTo

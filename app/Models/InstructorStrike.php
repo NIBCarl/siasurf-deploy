@@ -34,7 +34,7 @@ class InstructorStrike extends Model
 
     public function instructor(): BelongsTo
     {
-        return $this->belongsTo(User::class, 'instructor_id');
+        return $this->belongsTo(User::class, 'instructor_id')->withTrashed();
     }
 
     public function incident(): BelongsTo
@@ -44,12 +44,12 @@ class InstructorStrike extends Model
 
     public function appliedBy(): BelongsTo
     {
-        return $this->belongsTo(User::class, 'applied_by');
+        return $this->belongsTo(User::class, 'applied_by')->withTrashed();
     }
 
     public function revokedBy(): BelongsTo
     {
-        return $this->belongsTo(User::class, 'revoked_by');
+        return $this->belongsTo(User::class, 'revoked_by')->withTrashed();
     }
 
     public function scopeActive($query)

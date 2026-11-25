@@ -92,7 +92,7 @@ class Refund extends Model
 
     public function initiatedBy(): BelongsTo
     {
-        return $this->belongsTo(User::class, 'initiated_by');
+        return $this->belongsTo(User::class, 'initiated_by')->withTrashed();
     }
 
     public function scopePendingAction($query)

@@ -241,12 +241,12 @@ class Booking extends Model
     // Relationships
     public function student(): BelongsTo
     {
-        return $this->belongsTo(User::class, 'student_id');
+        return $this->belongsTo(User::class, 'student_id')->withTrashed();
     }
 
     public function instructor(): BelongsTo
     {
-        return $this->belongsTo(User::class, 'instructor_id');
+        return $this->belongsTo(User::class, 'instructor_id')->withTrashed();
     }
 
     public function surfSpot(): BelongsTo
@@ -342,7 +342,7 @@ class Booking extends Model
 
     public function attendanceMarkedBy(): BelongsTo
     {
-        return $this->belongsTo(User::class, 'attendance_marked_by');
+        return $this->belongsTo(User::class, 'attendance_marked_by')->withTrashed();
     }
 
     public function dailyLedger(): BelongsTo

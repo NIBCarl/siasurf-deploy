@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Enums\BookingStatus;
 use App\Enums\CertificateStatus;
 use App\Enums\InstructorStatus;
 use App\Enums\SuspensionStatus;
@@ -11,6 +12,7 @@ use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
+use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Spatie\Permission\Traits\HasRoles;
@@ -24,7 +26,7 @@ use Spatie\Permission\Traits\HasRoles;
  */
 class User extends Authenticatable implements MustVerifyEmail
 {
-    use HasFactory, HasRoles, Notifiable;
+    use HasFactory, HasRoles, Notifiable, SoftDeletes;
 
     protected $fillable = [
         'name',
@@ -275,5 +277,40 @@ class User extends Authenticatable implements MustVerifyEmail
             && $this->instructorProfile !== null
             && $this->instructorProfile->status === InstructorStatus::Active
             && ($this->instructorProfile->suspended_until === null || $this->instructorProfile->suspended_until <= now());
+    }
+
+    public function activeSlotHoldingBookingsCount(): int
+    {
+        $statuses = array_map(fn (BookingStatus $s) => $s->value, BookingStatus::slotHolding());
+
+        return Booking::query()
+            ->where(function ($q) {
+                $q->where('student_id', $this->id)
+                    ->orWhere('instructor_id', $this->id);
+            })
+            ->whereIn('status', $statuses)
+            ->count();
+    }
+
+    public function hasHistoricalRecords(): bool
+    {
+        return Booking::withTrashed()
+            ->where(fn ($q) => $q->where('student_id', $this->id)->orWhere('instructor_id', $this->id))
+            ->exists()
+            || SafetyIncident::withTrashed()
+                ->where(fn ($q) => $q->where('instructor_id', $this->id)->orWhere('reported_by', $this->id))
+                ->exists()
+            || Review::where(fn ($q) => $q->where('student_id', $this->id)->orWhere('instructor_id', $this->id))->exists()
+            || InstructorStrike::where('instructor_id', $this->id)->exists()
+            || InstructorFine::where('instructor_id', $this->id)->exists()
+            || InstructorPayout::where('instructor_id', $this->id)->exists()
+            || InstructorDailyLedger::where('instructor_id', $this->id)->exists()
+            || InstructorSuspension::where('instructor_id', $this->id)->exists()
+            || InstructorAppeal::where('instructor_id', $this->id)->exists()
+            || Conversation::where(fn ($q) => $q->where('student_id', $this->id)->orWhere('instructor_id', $this->id))->exists()
+            || Message::where('sender_id', $this->id)->exists()
+            || SkillUpgradeRequest::where(fn ($q) => $q->where('student_id', $this->id)->orWhere('instructor_id', $this->id))->exists()
+            || StudentSkillAssessment::where('user_id', $this->id)->exists()
+            || BookingEvent::where('actor_id', $this->id)->exists();
     }
 }

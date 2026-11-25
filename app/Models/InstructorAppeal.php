@@ -31,7 +31,7 @@ class InstructorAppeal extends Model
 
     public function instructor(): BelongsTo
     {
-        return $this->belongsTo(User::class, 'instructor_id');
+        return $this->belongsTo(User::class, 'instructor_id')->withTrashed();
     }
 
     public function suspension(): BelongsTo
@@ -41,7 +41,7 @@ class InstructorAppeal extends Model
 
     public function reviewedBy(): BelongsTo
     {
-        return $this->belongsTo(User::class, 'reviewed_by');
+        return $this->belongsTo(User::class, 'reviewed_by')->withTrashed();
     }
 
     public function scopePending($query)

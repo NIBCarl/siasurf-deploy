@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { Head, useForm, Link } from '@inertiajs/vue3'
+import { Head, useForm, Link, router } from '@inertiajs/vue3'
 import AppLayout from '@/Layouts/AppLayout.vue'
 import Modal from '@/Components/Modal.vue'
 import { 
+    ArrowPathIcon,
     ChevronLeftIcon,
     IdentificationIcon,
     ShieldCheckIcon,
@@ -17,7 +18,8 @@ import {
     DocumentTextIcon,
     StarIcon,
     ExclamationTriangleIcon,
-    PencilSquareIcon
+    PencilSquareIcon,
+    TrashIcon
 } from '@heroicons/vue/24/outline'
 import BaseButton from '@/Components/Atoms/BaseButton.vue'
 import Badge from '@/Components/Atoms/Badge.vue'
@@ -114,9 +116,49 @@ interface Props {
     net_payable: number
     has_overdue_remittance: boolean
   }
+  isArchived?: boolean
+  deletedAt?: string | null
+  activeBookingsCount?: number
+  canForceDelete?: boolean
 }
 
 const props = defineProps<Props>()
+
+const showArchiveModal = ref(false)
+const showForceDeleteModal = ref(false)
+const lifecycleProcessing = ref(false)
+
+const archiveInstructor = () => {
+  lifecycleProcessing.value = true
+  router.delete(route('admin.instructors.destroy', props.instructor.id), {
+    preserveScroll: true,
+    onFinish: () => {
+      lifecycleProcessing.value = false
+      showArchiveModal.value = false
+    },
+  })
+}
+
+const restoreInstructor = () => {
+  lifecycleProcessing.value = true
+  router.post(route('admin.instructors.restore', props.instructor.id), {}, {
+    preserveScroll: true,
+    onFinish: () => {
+      lifecycleProcessing.value = false
+    },
+  })
+}
+
+const forceDeleteInstructor = () => {
+  lifecycleProcessing.value = true
+  router.delete(route('admin.instructors.force-destroy', props.instructor.id), {
+    preserveScroll: true,
+    onFinish: () => {
+      lifecycleProcessing.value = false
+      showForceDeleteModal.value = false
+    },
+  })
+}
 
 const verifyForm = useForm({
   certificate_ids: props.instructor.certificates
@@ -241,6 +283,35 @@ const getStatusVariant = (status: string) => {
     <Head :title="'Instructor Dossier: ' + instructor.name" />
 
     <div class="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-700 pb-12">
+        <div v-if="isArchived" class="rounded-3xl border border-rose-200 bg-rose-50 p-6">
+            <div class="flex flex-wrap items-center justify-between gap-4">
+                <div>
+                    <p class="text-xs font-black uppercase tracking-[0.2em] text-rose-600">Archived Instructor Account</p>
+                    <p class="mt-2 text-sm font-semibold text-rose-900">
+                        This instructor account is archived{{ deletedAt ? ` (${formatDateTime(deletedAt)})` : '' }}, hidden from booking search and QR verification, and cannot sign in.
+                    </p>
+                    <p v-if="!canForceDelete" class="mt-1.5 text-xs text-rose-700">
+                        Permanent deletion is disabled because this instructor has historical booking, payout, strike, or incident records required for audit retention.
+                    </p>
+                </div>
+                <div class="flex flex-wrap items-center gap-2">
+                    <BaseButton variant="success" :loading="lifecycleProcessing" @click="restoreInstructor">
+                        <ArrowPathIcon class="w-4 h-4 mr-1.5" />
+                        Restore Instructor
+                    </BaseButton>
+                    <BaseButton
+                        v-if="canForceDelete"
+                        variant="danger"
+                        :disabled="lifecycleProcessing"
+                        @click="showForceDeleteModal = true"
+                    >
+                        <TrashIcon class="w-4 h-4 mr-1.5" />
+                        Delete Permanently
+                    </BaseButton>
+                </div>
+            </div>
+        </div>
+
         <div v-if="instructor.instructor_profile?.status === 'suspended'" class="rounded-3xl border border-rose-200 bg-rose-50 p-6">
             <div class="flex flex-wrap items-start justify-between gap-4">
                 <div>
@@ -325,7 +396,7 @@ const getStatusVariant = (status: string) => {
                 No Certificates Uploaded
             </div>
 
-            <div class="flex flex-wrap gap-2">
+            <div v-if="!isArchived" class="flex flex-wrap gap-2">
                 <BaseButton 
                     v-if="instructor.instructor_profile.status === 'pending_verification'" 
                     @click="confirmVerify" 
@@ -377,6 +448,17 @@ const getStatusVariant = (status: string) => {
                     <PencilSquareIcon class="w-4 h-4" />
                     Edit Dossier
                 </Link>
+
+                <BaseButton
+                    type="button"
+                    variant="danger"
+                    outline
+                    class="rounded-xl"
+                    @click="showArchiveModal = true"
+                >
+                    <TrashIcon class="w-4 h-4 mr-1.5" />
+                    Archive
+                </BaseButton>
             </div>
         </div>
 
@@ -957,6 +1039,46 @@ const getStatusVariant = (status: string) => {
                     :loading="fineForm.processing"
                 >
                     {{ fineMode === 'paid' ? 'Confirm Paid' : 'Confirm Waiver' }}
+                </BaseButton>
+            </div>
+        </div>
+    </Modal>
+
+    <!-- Archive Instructor Modal -->
+    <Modal :show="showArchiveModal" @close="showArchiveModal = false">
+        <div class="p-6">
+            <h2 class="text-lg font-bold text-slate-900 mb-2">Archive Instructor Account</h2>
+            <p class="text-sm text-slate-600 mb-4">
+                Archiving <strong>{{ instructor.name }}</strong> removes them from active booking search and disables login while preserving all lesson, payout, strike, and incident records.
+            </p>
+            <div v-if="(activeBookingsCount ?? 0) > 0" class="mb-4 rounded-xl border border-rose-200 bg-rose-50 p-3 text-xs font-semibold text-rose-800">
+                Cannot archive: {{ instructor.name }} still has {{ activeBookingsCount }} active or upcoming booking(s). Cancel or complete those bookings first.
+            </div>
+            <div class="flex justify-end gap-3">
+                <BaseButton variant="secondary" @click="showArchiveModal = false">Cancel</BaseButton>
+                <BaseButton
+                    variant="danger"
+                    :disabled="(activeBookingsCount ?? 0) > 0"
+                    :loading="lifecycleProcessing"
+                    @click="archiveInstructor"
+                >
+                    Confirm Archive
+                </BaseButton>
+            </div>
+        </div>
+    </Modal>
+
+    <!-- Force Delete Instructor Modal -->
+    <Modal :show="showForceDeleteModal" @close="showForceDeleteModal = false">
+        <div class="p-6">
+            <h2 class="text-lg font-bold text-rose-700 mb-2">Permanently Delete Instructor</h2>
+            <p class="text-sm text-slate-600 mb-4">
+                This will permanently erase <strong>{{ instructor.name }}</strong>, their profile, and their uploaded certificates from the database. This cannot be undone.
+            </p>
+            <div class="flex justify-end gap-3">
+                <BaseButton variant="secondary" @click="showForceDeleteModal = false">Cancel</BaseButton>
+                <BaseButton variant="danger" :loading="lifecycleProcessing" @click="forceDeleteInstructor">
+                    Delete Permanently
                 </BaseButton>
             </div>
         </div>

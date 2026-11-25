@@ -7,7 +7,7 @@ import AppCard from '@/Components/UI/AppCard.vue'
 import EmptyState from '@/Components/UI/EmptyState.vue'
 import SectionHeader from '@/Components/UI/SectionHeader.vue'
 import StatusPill from '@/Components/UI/StatusPill.vue'
-import { ChevronRightIcon, MagnifyingGlassIcon, UserGroupIcon } from '@heroicons/vue/24/outline'
+import { ChevronRightIcon, MagnifyingGlassIcon, PlusIcon, UserGroupIcon } from '@heroicons/vue/24/outline'
 import debounce from 'lodash/debounce'
 
 interface Student {
@@ -15,6 +15,7 @@ interface Student {
     name: string
     email: string
     phone: string | null
+    deleted_at?: string | null
     student_profile?: {
         skill_level: string
         status: string
@@ -31,27 +32,51 @@ interface Props {
     }
     filters: {
         search?: string
+        view?: string
+    }
+    counts?: {
+        active: number
+        archived: number
     }
 }
 
 const props = defineProps<Props>()
 
 const search = ref(props.filters.search ?? '')
+const currentView = ref(props.filters.view ?? 'active')
 
-const applySearch = debounce(() => {
+const applyQuery = () => {
+    const params: Record<string, string> = {}
+    if (search.value.trim()) params.search = search.value.trim()
+    if (currentView.value !== 'active') params.view = currentView.value
+
     router.get(
         route('admin.students.index'),
-        search.value ? { search: search.value } : {},
+        params,
         { preserveState: true, preserveScroll: true, replace: true },
     )
-}, 400)
+}
+
+const applySearch = debounce(applyQuery, 400)
 
 watch(search, applySearch)
 
-const hasSearch = computed(() => search.value.trim() !== '')
+const setView = (view: 'active' | 'archived' | 'all') => {
+    currentView.value = view
+    applyQuery()
+}
+
+const restoreStudent = (student: Student) => {
+    if (!confirm(`Restore ${student.name} back to active students?`)) return
+    router.post(route('admin.students.restore', student.id), {}, { preserveScroll: true })
+}
+
+const hasSearch = computed(() => search.value.trim() !== '' || currentView.value !== 'active')
 
 const clearSearch = () => {
     search.value = ''
+    currentView.value = 'active'
+    applyQuery()
 }
 
 type PillVariant = 'neutral' | 'verified' | 'live' | 'pending' | 'completed' | 'cancelled' | 'critical'
@@ -102,9 +127,54 @@ const paginationLabel = (label: string) =>
                     description="Manage student accounts, review lesson history and handle bans."
                 />
 
-                <StatusPill variant="neutral" :dot="false">
-                    {{ students.total ?? students.data.length }} students
-                </StatusPill>
+                <div class="flex flex-wrap items-center gap-2">
+                    <StatusPill variant="neutral" :dot="false">
+                        {{ students.total ?? students.data.length }} students
+                    </StatusPill>
+                    <AppButton :href="route('admin.students.create')">
+                        <PlusIcon class="h-4 w-4" aria-hidden="true" />
+                        Add student
+                    </AppButton>
+                </div>
+            </div>
+
+            <div class="flex flex-wrap items-center gap-2">
+                <button
+                    type="button"
+                    @click="setView('active')"
+                    :class="[
+                        'rounded-control border px-3.5 py-2 text-body-sm font-semibold transition-colors',
+                        currentView === 'active'
+                            ? 'border-deep-900 bg-deep-900 text-white'
+                            : 'border-sand-200 bg-white text-stone-600 hover:border-lagoon-600',
+                    ]"
+                >
+                    Active ({{ counts?.active ?? 0 }})
+                </button>
+                <button
+                    type="button"
+                    @click="setView('archived')"
+                    :class="[
+                        'rounded-control border px-3.5 py-2 text-body-sm font-semibold transition-colors',
+                        currentView === 'archived'
+                            ? 'border-deep-900 bg-deep-900 text-white'
+                            : 'border-sand-200 bg-white text-stone-600 hover:border-lagoon-600',
+                    ]"
+                >
+                    Archived ({{ counts?.archived ?? 0 }})
+                </button>
+                <button
+                    type="button"
+                    @click="setView('all')"
+                    :class="[
+                        'rounded-control border px-3.5 py-2 text-body-sm font-semibold transition-colors',
+                        currentView === 'all'
+                            ? 'border-deep-900 bg-deep-900 text-white'
+                            : 'border-sand-200 bg-white text-stone-600 hover:border-lagoon-600',
+                    ]"
+                >
+                    All
+                </button>
             </div>
 
             <AppCard padding="md">
@@ -159,6 +229,9 @@ const paginationLabel = (label: string) =>
                         </div>
 
                         <div class="flex flex-wrap items-center gap-1.5">
+                            <StatusPill v-if="student.deleted_at" variant="critical">
+                                Archived
+                            </StatusPill>
                             <StatusPill variant="neutral" :dot="false">
                                 {{ skillLabel(student.student_profile?.skill_level) }}
                             </StatusPill>
@@ -173,15 +246,35 @@ const paginationLabel = (label: string) =>
                             </StatusPill>
                         </div>
 
-                        <AppButton
-                            :href="route('admin.students.show', student.id)"
-                            variant="secondary"
-                            size="sm"
-                            block
-                        >
-                            Open dossier
-                            <ChevronRightIcon class="h-4 w-4" aria-hidden="true" />
-                        </AppButton>
+                        <div class="flex gap-2">
+                            <AppButton
+                                v-if="student.deleted_at"
+                                variant="primary"
+                                size="sm"
+                                block
+                                @click="restoreStudent(student)"
+                            >
+                                Restore
+                            </AppButton>
+                            <AppButton
+                                v-else
+                                :href="route('admin.students.edit', student.id)"
+                                variant="secondary"
+                                size="sm"
+                                block
+                            >
+                                Edit
+                            </AppButton>
+                            <AppButton
+                                :href="route('admin.students.show', student.id)"
+                                variant="secondary"
+                                size="sm"
+                                block
+                            >
+                                Open dossier
+                                <ChevronRightIcon class="h-4 w-4" aria-hidden="true" />
+                            </AppButton>
+                        </div>
                     </div>
                 </div>
 
@@ -236,6 +329,9 @@ const paginationLabel = (label: string) =>
 
                                 <td class="px-5 py-4">
                                     <div class="flex flex-wrap items-center gap-1.5">
+                                        <StatusPill v-if="student.deleted_at" variant="critical">
+                                            Archived
+                                        </StatusPill>
                                         <StatusPill :variant="statusMeta(student.student_profile?.status).variant">
                                             {{ statusMeta(student.student_profile?.status).label }}
                                         </StatusPill>
@@ -249,14 +345,32 @@ const paginationLabel = (label: string) =>
                                 </td>
 
                                 <td class="px-5 py-4 text-right">
-                                    <AppButton
-                                        :href="route('admin.students.show', student.id)"
-                                        variant="secondary"
-                                        size="sm"
-                                    >
-                                        Open
-                                        <ChevronRightIcon class="h-4 w-4" aria-hidden="true" />
-                                    </AppButton>
+                                    <div class="inline-flex items-center gap-2">
+                                        <AppButton
+                                            v-if="student.deleted_at"
+                                            variant="primary"
+                                            size="sm"
+                                            @click="restoreStudent(student)"
+                                        >
+                                            Restore
+                                        </AppButton>
+                                        <AppButton
+                                            v-else
+                                            :href="route('admin.students.edit', student.id)"
+                                            variant="secondary"
+                                            size="sm"
+                                        >
+                                            Edit
+                                        </AppButton>
+                                        <AppButton
+                                            :href="route('admin.students.show', student.id)"
+                                            variant="secondary"
+                                            size="sm"
+                                        >
+                                            Open
+                                            <ChevronRightIcon class="h-4 w-4" aria-hidden="true" />
+                                        </AppButton>
+                                    </div>
                                 </td>
                             </tr>
                         </tbody>

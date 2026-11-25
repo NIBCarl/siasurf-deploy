@@ -57,7 +57,7 @@ class InstructorDailyLedger extends Model
 
     public function instructor(): BelongsTo
     {
-        return $this->belongsTo(User::class, 'instructor_id');
+        return $this->belongsTo(User::class, 'instructor_id')->withTrashed();
     }
 
     public function payout(): BelongsTo

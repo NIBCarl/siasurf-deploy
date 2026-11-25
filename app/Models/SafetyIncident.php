@@ -81,12 +81,12 @@ class SafetyIncident extends Model
 
     public function instructor(): BelongsTo
     {
-        return $this->belongsTo(User::class, 'instructor_id');
+        return $this->belongsTo(User::class, 'instructor_id')->withTrashed();
     }
 
     public function reporter(): BelongsTo
     {
-        return $this->belongsTo(User::class, 'reported_by');
+        return $this->belongsTo(User::class, 'reported_by')->withTrashed();
     }
 
     public function review(): BelongsTo
@@ -96,12 +96,12 @@ class SafetyIncident extends Model
 
     public function confirmer(): BelongsTo
     {
-        return $this->belongsTo(User::class, 'confirmed_by');
+        return $this->belongsTo(User::class, 'confirmed_by')->withTrashed();
     }
 
     public function rejecter(): BelongsTo
     {
-        return $this->belongsTo(User::class, 'rejected_by');
+        return $this->belongsTo(User::class, 'rejected_by')->withTrashed();
     }
 
     public function strike(): HasOne

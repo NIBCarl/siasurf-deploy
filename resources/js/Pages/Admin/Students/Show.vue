@@ -1,18 +1,22 @@
 <script setup lang="ts">
 import { Head, Link, router } from '@inertiajs/vue3'
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import AppLayout from '@/Layouts/AppLayout.vue'
-import { 
+import Modal from '@/Components/Modal.vue'
+import {
     ArrowLeftIcon,
+    ArrowPathIcon,
     CalendarDaysIcon,
     MapPinIcon,
     DocumentTextIcon,
+    PencilSquareIcon,
     ShieldExclamationIcon,
     ExclamationTriangleIcon,
     ClockIcon,
     CurrencyDollarIcon,
     PhoneIcon,
-    EnvelopeIcon
+    EnvelopeIcon,
+    TrashIcon
 } from '@heroicons/vue/24/outline'
 import BaseButton from '@/Components/Atoms/BaseButton.vue'
 import Badge from '@/Components/Atoms/Badge.vue'
@@ -101,9 +105,49 @@ interface SkillAssessment {
 interface Props {
   student: Student
   skillAssessment?: SkillAssessment | null
+  isArchived?: boolean
+  deletedAt?: string | null
+  activeBookingsCount?: number
+  canForceDelete?: boolean
 }
 
 const props = defineProps<Props>()
+
+const showArchiveModal = ref(false)
+const showForceDeleteModal = ref(false)
+const lifecycleProcessing = ref(false)
+
+const archiveStudent = () => {
+    lifecycleProcessing.value = true
+    router.delete(route('admin.students.destroy', props.student.id), {
+        preserveScroll: true,
+        onFinish: () => {
+            lifecycleProcessing.value = false
+            showArchiveModal.value = false
+        },
+    })
+}
+
+const restoreStudent = () => {
+    lifecycleProcessing.value = true
+    router.post(route('admin.students.restore', props.student.id), {}, {
+        preserveScroll: true,
+        onFinish: () => {
+            lifecycleProcessing.value = false
+        },
+    })
+}
+
+const forceDeleteStudent = () => {
+    lifecycleProcessing.value = true
+    router.delete(route('admin.students.force-destroy', props.student.id), {
+        preserveScroll: true,
+        onFinish: () => {
+            lifecycleProcessing.value = false
+            showForceDeleteModal.value = false
+        },
+    })
+}
 
 const isBookingUnderpaid = (booking: Booking) =>
     booking.payment_status === 'underpaid' || booking.payment?.status === 'underpaid'
@@ -162,6 +206,35 @@ const toggleBanStatus = () => {
         <Head :title="`Admin: ${student.name} Profile`" />
 
         <div class="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-700">
+            <div v-if="isArchived" class="rounded-3xl border border-rose-200 bg-rose-50 p-6">
+                <div class="flex flex-wrap items-center justify-between gap-4">
+                    <div>
+                        <p class="text-xs font-black uppercase tracking-[0.2em] text-rose-600">Archived Student Account</p>
+                        <p class="mt-1 text-sm font-semibold text-rose-900">
+                            This student account is archived{{ deletedAt ? ` (${formatPhilippineDate(deletedAt)})` : '' }} and cannot log in or create bookings. Historical bookings and waivers remain preserved.
+                        </p>
+                        <p v-if="!canForceDelete" class="mt-1.5 text-xs text-rose-700">
+                            Permanent deletion is disabled because this student has historical booking, waiver, or incident records required for audit retention.
+                        </p>
+                    </div>
+                    <div class="flex flex-wrap items-center gap-2">
+                        <BaseButton variant="success" :loading="lifecycleProcessing" @click="restoreStudent">
+                            <ArrowPathIcon class="mr-1.5 h-4 w-4" />
+                            Restore Student
+                        </BaseButton>
+                        <BaseButton
+                            v-if="canForceDelete"
+                            variant="danger"
+                            :disabled="lifecycleProcessing"
+                            @click="showForceDeleteModal = true"
+                        >
+                            <TrashIcon class="mr-1.5 h-4 w-4" />
+                            Delete Permanently
+                        </BaseButton>
+                    </div>
+                </div>
+            </div>
+
             <!-- Header Section -->
             <div class="flex flex-col md:flex-row md:items-start justify-between gap-6">
                 <div>
@@ -195,7 +268,24 @@ const toggleBanStatus = () => {
                     </div>
                 </div>
                 
-                <div class="flex gap-3">
+                <div v-if="!isArchived" class="flex flex-wrap gap-3">
+                    <Link
+                        :href="route('admin.students.edit', student.id)"
+                        class="flex items-center gap-2 px-4 py-2.5 bg-slate-900 text-white rounded-xl text-sm font-bold hover:bg-slate-800 transition-all shadow-lg shadow-slate-900/10"
+                    >
+                        <PencilSquareIcon class="w-4 h-4" />
+                        Edit Student
+                    </Link>
+
+                    <button
+                        type="button"
+                        @click="showArchiveModal = true"
+                        class="flex items-center gap-2 px-4 py-2.5 bg-white border border-rose-200 text-rose-700 rounded-xl text-sm font-bold hover:bg-rose-50 transition-all"
+                    >
+                        <TrashIcon class="w-4 h-4" />
+                        Archive
+                    </button>
+
                     <button 
                         @click="toggleBanStatus"
                         :class="[
@@ -496,5 +586,43 @@ const toggleBanStatus = () => {
                 </div>
             </div>
         </div>
+
+        <Modal :show="showArchiveModal" @close="showArchiveModal = false">
+            <div class="p-6">
+                <h2 class="text-lg font-bold text-slate-900 mb-2">Archive Student Account</h2>
+                <p class="text-sm text-slate-600 mb-4">
+                    Archiving <strong>{{ student.name }}</strong> disables login and removes them from the active student directory while preserving all booking, payment, and waiver history. You can restore them anytime.
+                </p>
+                <div v-if="(activeBookingsCount ?? 0) > 0" class="mb-4 rounded-xl border border-rose-200 bg-rose-50 p-3 text-xs font-semibold text-rose-800">
+                    Cannot archive: {{ student.name }} still has {{ activeBookingsCount }} active or upcoming booking(s). Cancel or complete those bookings first.
+                </div>
+                <div class="flex justify-end gap-3">
+                    <BaseButton variant="secondary" @click="showArchiveModal = false">Cancel</BaseButton>
+                    <BaseButton
+                        variant="danger"
+                        :disabled="(activeBookingsCount ?? 0) > 0"
+                        :loading="lifecycleProcessing"
+                        @click="archiveStudent"
+                    >
+                        Confirm Archive
+                    </BaseButton>
+                </div>
+            </div>
+        </Modal>
+
+        <Modal :show="showForceDeleteModal" @close="showForceDeleteModal = false">
+            <div class="p-6">
+                <h2 class="text-lg font-bold text-rose-700 mb-2">Permanently Delete Student</h2>
+                <p class="text-sm text-slate-600 mb-4">
+                    This will permanently erase <strong>{{ student.name }}</strong> and their profile from the database. This cannot be undone.
+                </p>
+                <div class="flex justify-end gap-3">
+                    <BaseButton variant="secondary" @click="showForceDeleteModal = false">Cancel</BaseButton>
+                    <BaseButton variant="danger" :loading="lifecycleProcessing" @click="forceDeleteStudent">
+                        Delete Permanently
+                    </BaseButton>
+                </div>
+            </div>
+        </Modal>
     </AppLayout>
 </template>

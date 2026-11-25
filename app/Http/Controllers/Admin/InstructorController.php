@@ -21,6 +21,7 @@ use App\Notifications\InstructorLevelUpdatedNotification;
 use App\Notifications\InstructorReactivated;
 use App\Notifications\InstructorRejected;
 use App\Notifications\InstructorVerified;
+use App\Services\AdminUserLifecycleService;
 use App\Services\PricingService;
 use App\Services\QRCodeService;
 use App\Services\SuspensionService;
@@ -46,10 +47,20 @@ class InstructorController extends Controller
      */
     public function index(Request $request): Response
     {
+        $view = in_array($request->query('view'), ['active', 'archived', 'all'], true)
+            ? $request->query('view')
+            : 'active';
+
         $query = User::with('instructorProfile')
             ->join('instructor_profiles', 'instructor_profiles.user_id', '=', 'users.id')
             ->select('users.*')
             ->where('users.role', 'instructor');
+
+        if ($view === 'archived') {
+            $query->onlyTrashed();
+        } elseif ($view === 'all') {
+            $query->withTrashed();
+        }
 
         // Filter by status
         if ($request->filled('status')) {
@@ -81,7 +92,20 @@ class InstructorController extends Controller
 
         return Inertia::render('Admin/Instructors/Index', [
             'instructors' => $instructors,
-            'filters' => $request->only(['status', 'level', 'search']),
+            'filters' => array_merge(
+                $request->only(['status', 'level', 'search']),
+                ['view' => $view]
+            ),
+            'counts' => [
+                'active' => User::query()
+                    ->join('instructor_profiles', 'instructor_profiles.user_id', '=', 'users.id')
+                    ->where('users.role', 'instructor')
+                    ->count(),
+                'archived' => User::onlyTrashed()
+                    ->join('instructor_profiles', 'instructor_profiles.user_id', '=', 'users.id')
+                    ->where('users.role', 'instructor')
+                    ->count(),
+            ],
         ]);
     }
 
@@ -190,7 +214,7 @@ class InstructorController extends Controller
         // not have an image on disk yet. Generate it lazily so the dossier is
         // always actionable.
         $profile = $instructor->instructorProfile;
-        if ($profile && $profile->status === InstructorStatus::Active) {
+        if (! $instructor->trashed() && $profile && $profile->status === InstructorStatus::Active) {
             $path = $profile->qr_code_path;
             if (! $path || ! Storage::disk('local')->exists($path)) {
                 $this->qrCodeService->ensureInstructorQR($profile);
@@ -281,8 +305,12 @@ class InstructorController extends Controller
             ] : null,
             'fines' => $fines,
             'hasDueFines' => $fines->contains(fn ($fine) => $fine['status'] === FineStatus::Due->value),
-            'canReinstate' => $profile?->status === InstructorStatus::Suspended,
+            'canReinstate' => ! $instructor->trashed() && $profile?->status === InstructorStatus::Suspended,
             'ledgerSummary' => app(\App\Services\EarningsLedgerService::class)->getInstructorSummary($instructor),
+            'isArchived' => $instructor->trashed(),
+            'deletedAt' => $instructor->deleted_at?->toIso8601String(),
+            'activeBookingsCount' => $instructor->activeSlotHoldingBookingsCount(),
+            'canForceDelete' => $instructor->trashed() && ! $instructor->hasHistoricalRecords(),
         ]);
     }
 
@@ -821,5 +849,42 @@ class InstructorController extends Controller
         return redirect()
             ->route('admin.instructors.show', $instructor->id)
             ->with('success', 'Instructor dossier updated successfully.');
+    }
+
+    public function destroy(Request $request, User $instructor, AdminUserLifecycleService $lifecycle): RedirectResponse
+    {
+        abort_unless($instructor->isInstructor(), 404);
+
+        $result = $lifecycle->archive($instructor, $request->user());
+
+        if (! $result['ok']) {
+            return back()->with('error', $result['message']);
+        }
+
+        return redirect()->route('admin.instructors.index')
+            ->with('success', $result['message']);
+    }
+
+    public function restore(User $instructor, AdminUserLifecycleService $lifecycle): RedirectResponse
+    {
+        abort_unless($instructor->isInstructor(), 404);
+
+        $result = $lifecycle->restore($instructor);
+
+        return back()->with($result['ok'] ? 'success' : 'error', $result['message']);
+    }
+
+    public function forceDestroy(User $instructor, AdminUserLifecycleService $lifecycle): RedirectResponse
+    {
+        abort_unless($instructor->isInstructor(), 404);
+
+        $result = $lifecycle->forceDelete($instructor);
+
+        if (! $result['ok']) {
+            return back()->with('error', $result['message']);
+        }
+
+        return redirect()->route('admin.instructors.index', ['view' => 'archived'])
+            ->with('success', $result['message']);
     }
 }

@@ -21,6 +21,7 @@ interface Instructor {
     name: string
     avatar_path: string | null
     email: string
+    deleted_at?: string | null
     instructor_profile: {
         level: number
         status: string
@@ -38,6 +39,11 @@ interface Props {
         status?: string
         level?: string
         search?: string
+        view?: string
+    }
+    counts?: {
+        active: number
+        archived: number
     }
 }
 
@@ -47,11 +53,15 @@ const filters = ref({
     search: props.filters?.search ?? '',
     status: props.filters?.status ?? '',
     level: props.filters?.level ?? '',
+    view: props.filters?.view ?? 'active',
 })
 
 const applyFilters = debounce(() => {
     const params = Object.fromEntries(
-        Object.entries(filters.value).filter(([, value]) => value !== '' && value !== null),
+        Object.entries(filters.value).filter(([key, value]) => {
+            if (key === 'view') return value !== '' && value !== 'active'
+            return value !== '' && value !== null
+        }),
     )
 
     router.get(route('admin.instructors.index'), params, {
@@ -63,10 +73,21 @@ const applyFilters = debounce(() => {
 
 watch(filters, applyFilters, { deep: true })
 
-const hasFilters = computed(() => Object.values(filters.value).some((value) => value !== ''))
+const setView = (view: 'active' | 'archived' | 'all') => {
+    filters.value.view = view
+}
+
+const restoreInstructor = (instructor: Instructor) => {
+    if (!confirm(`Restore ${instructor.name} back to the active instructor roster?`)) return
+    router.post(route('admin.instructors.restore', instructor.id), {}, { preserveScroll: true })
+}
+
+const hasFilters = computed(() =>
+    filters.value.search !== '' || filters.value.status !== '' || filters.value.level !== '' || filters.value.view !== 'active',
+)
 
 const clearFilters = () => {
-    filters.value = { search: '', status: '', level: '' }
+    filters.value = { search: '', status: '', level: '', view: 'active' }
 }
 
 type PillVariant = 'neutral' | 'verified' | 'live' | 'pending' | 'completed' | 'cancelled' | 'critical'
@@ -144,6 +165,45 @@ const paginationLabel = (label: string) =>
             </div>
 
             <!-- Real filters -->
+            <div class="flex flex-wrap items-center gap-2">
+                <button
+                    type="button"
+                    @click="setView('active')"
+                    :class="[
+                        'rounded-control border px-3.5 py-2 text-body-sm font-semibold transition-colors',
+                        filters.view === 'active'
+                            ? 'border-deep-900 bg-deep-900 text-white'
+                            : 'border-sand-200 bg-white text-stone-600 hover:border-lagoon-600',
+                    ]"
+                >
+                    Active ({{ counts?.active ?? 0 }})
+                </button>
+                <button
+                    type="button"
+                    @click="setView('archived')"
+                    :class="[
+                        'rounded-control border px-3.5 py-2 text-body-sm font-semibold transition-colors',
+                        filters.view === 'archived'
+                            ? 'border-deep-900 bg-deep-900 text-white'
+                            : 'border-sand-200 bg-white text-stone-600 hover:border-lagoon-600',
+                    ]"
+                >
+                    Archived ({{ counts?.archived ?? 0 }})
+                </button>
+                <button
+                    type="button"
+                    @click="setView('all')"
+                    :class="[
+                        'rounded-control border px-3.5 py-2 text-body-sm font-semibold transition-colors',
+                        filters.view === 'all'
+                            ? 'border-deep-900 bg-deep-900 text-white'
+                            : 'border-sand-200 bg-white text-stone-600 hover:border-lagoon-600',
+                    ]"
+                >
+                    All
+                </button>
+            </div>
+
             <AppCard padding="md">
                 <div class="grid gap-3 md:grid-cols-[1fr_180px_180px_auto]">
                     <div class="relative">
@@ -231,6 +291,9 @@ const paginationLabel = (label: string) =>
                         </div>
 
                         <div class="flex flex-wrap items-center gap-1.5">
+                            <StatusPill v-if="instructor.deleted_at" variant="critical">
+                                Archived
+                            </StatusPill>
                             <StatusPill :variant="statusMeta(instructor.instructor_profile.status).variant">
                                 {{ statusMeta(instructor.instructor_profile.status).label }}
                             </StatusPill>
@@ -239,15 +302,26 @@ const paginationLabel = (label: string) =>
                             </StatusPill>
                         </div>
 
-                        <AppButton
-                            :href="route('admin.instructors.show', instructor.id)"
-                            variant="secondary"
-                            size="sm"
-                            block
-                        >
-                            Open dossier
-                            <ChevronRightIcon class="h-4 w-4" aria-hidden="true" />
-                        </AppButton>
+                        <div class="flex gap-2">
+                            <AppButton
+                                v-if="instructor.deleted_at"
+                                variant="primary"
+                                size="sm"
+                                block
+                                @click="restoreInstructor(instructor)"
+                            >
+                                Restore
+                            </AppButton>
+                            <AppButton
+                                :href="route('admin.instructors.show', instructor.id)"
+                                variant="secondary"
+                                size="sm"
+                                block
+                            >
+                                Open dossier
+                                <ChevronRightIcon class="h-4 w-4" aria-hidden="true" />
+                            </AppButton>
+                        </div>
                     </div>
                 </div>
 
@@ -311,9 +385,14 @@ const paginationLabel = (label: string) =>
                                 </td>
 
                                 <td class="px-5 py-4">
-                                    <StatusPill :variant="statusMeta(instructor.instructor_profile.status).variant">
-                                        {{ statusMeta(instructor.instructor_profile.status).label }}
-                                    </StatusPill>
+                                    <div class="flex flex-wrap items-center gap-1.5">
+                                        <StatusPill v-if="instructor.deleted_at" variant="critical">
+                                            Archived
+                                        </StatusPill>
+                                        <StatusPill :variant="statusMeta(instructor.instructor_profile.status).variant">
+                                            {{ statusMeta(instructor.instructor_profile.status).label }}
+                                        </StatusPill>
+                                    </div>
                                 </td>
 
                                 <td class="px-5 py-4 text-right">
@@ -324,14 +403,24 @@ const paginationLabel = (label: string) =>
                                 </td>
 
                                 <td class="px-5 py-4 text-right">
-                                    <AppButton
-                                        :href="route('admin.instructors.show', instructor.id)"
-                                        variant="secondary"
-                                        size="sm"
-                                    >
-                                        Open
-                                        <ChevronRightIcon class="h-4 w-4" aria-hidden="true" />
-                                    </AppButton>
+                                    <div class="inline-flex items-center gap-2">
+                                        <AppButton
+                                            v-if="instructor.deleted_at"
+                                            variant="primary"
+                                            size="sm"
+                                            @click="restoreInstructor(instructor)"
+                                        >
+                                            Restore
+                                        </AppButton>
+                                        <AppButton
+                                            :href="route('admin.instructors.show', instructor.id)"
+                                            variant="secondary"
+                                            size="sm"
+                                        >
+                                            Open
+                                            <ChevronRightIcon class="h-4 w-4" aria-hidden="true" />
+                                        </AppButton>
+                                    </div>
                                 </td>
                             </tr>
                         </tbody>

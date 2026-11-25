@@ -329,9 +329,12 @@ Route::middleware(['auth', 'verified', 'role:admin'])->prefix('admin')->as('admi
     Route::get('/instructors', [InstructorController::class, 'index'])->name('instructors.index');
     Route::get('/instructors/create', [InstructorController::class, 'create'])->name('instructors.create');
     Route::post('/instructors', [InstructorController::class, 'store'])->name('instructors.store');
-    Route::get('/instructors/{instructor}', [InstructorController::class, 'show'])->name('instructors.show');
+    Route::get('/instructors/{instructor}', [InstructorController::class, 'show'])->withTrashed()->name('instructors.show');
     Route::get('/instructors/{instructor}/edit', [InstructorController::class, 'edit'])->name('instructors.edit');
     Route::put('/instructors/{instructor}', [InstructorController::class, 'update'])->name('instructors.update');
+    Route::delete('/instructors/{instructor}', [InstructorController::class, 'destroy'])->name('instructors.destroy');
+    Route::post('/instructors/{instructor}/restore', [InstructorController::class, 'restore'])->withTrashed()->name('instructors.restore');
+    Route::delete('/instructors/{instructor}/force-delete', [InstructorController::class, 'forceDestroy'])->withTrashed()->name('instructors.force-destroy');
 
     // Instructor verification actions
     Route::post('/instructors/{instructor}/verify', [InstructorController::class, 'verify'])->name('instructors.verify');
@@ -369,8 +372,15 @@ Route::middleware(['auth', 'verified', 'role:admin'])->prefix('admin')->as('admi
 
     // Student Management
     Route::get('/students', [StudentController::class, 'index'])->name('students.index');
-    Route::get('/students/{user}', [StudentController::class, 'show'])->name('students.show');
+    Route::get('/students/create', [StudentController::class, 'create'])->name('students.create');
+    Route::post('/students', [StudentController::class, 'store'])->name('students.store');
+    Route::get('/students/{user}', [StudentController::class, 'show'])->withTrashed()->name('students.show');
+    Route::get('/students/{user}/edit', [StudentController::class, 'edit'])->name('students.edit');
+    Route::put('/students/{user}', [StudentController::class, 'update'])->name('students.update');
     Route::post('/students/{user}/toggle-status', [StudentController::class, 'toggleStatus'])->name('students.toggle-status');
+    Route::delete('/students/{user}', [StudentController::class, 'destroy'])->name('students.destroy');
+    Route::post('/students/{user}/restore', [StudentController::class, 'restore'])->withTrashed()->name('students.restore');
+    Route::delete('/students/{user}/force-delete', [StudentController::class, 'forceDestroy'])->withTrashed()->name('students.force-destroy');
 
     // Safety incidents and student reports
     Route::get('/incidents', [IncidentController::class, 'index'])->name('incidents.index');

@@ -35,7 +35,7 @@ class InstructorFine extends Model
 
     public function instructor(): BelongsTo
     {
-        return $this->belongsTo(User::class, 'instructor_id');
+        return $this->belongsTo(User::class, 'instructor_id')->withTrashed();
     }
 
     public function incident(): BelongsTo
@@ -50,12 +50,12 @@ class InstructorFine extends Model
 
     public function issuedBy(): BelongsTo
     {
-        return $this->belongsTo(User::class, 'issued_by');
+        return $this->belongsTo(User::class, 'issued_by')->withTrashed();
     }
 
     public function settledBy(): BelongsTo
     {
-        return $this->belongsTo(User::class, 'settled_by');
+        return $this->belongsTo(User::class, 'settled_by')->withTrashed();
     }
 
     public function scopeDue($query)

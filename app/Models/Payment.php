@@ -68,7 +68,7 @@ class Payment extends Model
      */
     public function verifiedBy(): BelongsTo
     {
-        return $this->belongsTo(User::class, 'receipt_verified_by');
+        return $this->belongsTo(User::class, 'receipt_verified_by')->withTrashed();
     }
 
     // Scopes
