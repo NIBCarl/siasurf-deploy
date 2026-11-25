@@ -10,6 +10,7 @@ use App\Notifications\CertificateStatusNotification;
 use App\Services\FileScanService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
@@ -170,6 +171,46 @@ class CertificateController extends Controller
         }
 
         return back()->with('success', 'Certificate rejected.');
+    }
+
+    /**
+     * Update a certificate's expiry date.
+     *
+     * Verification is the only other place an expiry is written, so without this
+     * a lapsed SISA ID or certificate could only be renewed by deleting the row
+     * and re-uploading the document, which discards the stored file reference.
+     *
+     * When a lapsed certificate is re-dated into the future it returns to
+     * Verified so the instructor becomes bookable again without a re-audit.
+     */
+    public function update(Request $request, Certificate $certificate): RedirectResponse
+    {
+        $this->authorize('update', $certificate);
+
+        $validated = $request->validate([
+            'expires_at' => 'required|date|after:today',
+        ]);
+
+        $expiresAt = Carbon::parse($validated['expires_at']);
+
+        $attributes = ['expires_at' => $expiresAt];
+
+        if ($certificate->status === CertificateStatus::Expired) {
+            $attributes['status'] = CertificateStatus::Verified;
+            $attributes['verified_at'] = now();
+        }
+
+        $certificate->update($attributes);
+
+        Log::info('Certificate expiry updated', [
+            'certificate_id' => $certificate->id,
+            'user_id' => $certificate->user_id,
+            'type' => $certificate->type->value,
+            'expires_at' => $expiresAt->toIso8601String(),
+            'admin_id' => $request->user()?->id,
+        ]);
+
+        return back()->with('success', 'Certificate expiry updated.');
     }
 
     /**

@@ -26,7 +26,7 @@ import Badge from '@/Components/Atoms/Badge.vue'
 import SurfZoneMap, { type SurfZoneSpot } from '@/Components/Organisms/SurfZoneMap.vue'
 import SurfZoneTabs from '@/Components/Molecules/SurfZoneTabs.vue'
 import { formatDateTime } from '@/utils/date'
-import { parsePhilippineDate } from '@/utils/philippineTime'
+import { parsePhilippineDate, getPhilippineDateParts, formatDatePartsKey } from '@/utils/philippineTime'
 
 interface Certificate {
   id: number
@@ -265,6 +265,33 @@ const suspendForm = useForm({
 const certForm = useForm({})
 const verifyCert = (certId: number) => {
   certForm.post(route('admin.certificates.verify', certId))
+}
+
+const showExpiryModal = ref(false)
+const selectedCert = ref<Certificate | null>(null)
+const expiryForm = useForm({ expires_at: '' })
+
+/** Convert a stored timestamp into a YYYY-MM-DD value for a date input, in PH time. */
+const toDateInputValue = (value: string | null | undefined): string => {
+  const parsed = parsePhilippineDate(value)
+  if (!parsed) return ''
+  const { year, month, day } = getPhilippineDateParts(parsed)
+  return formatDatePartsKey(year, month, day)
+}
+
+const openExpiryModal = (cert: Certificate) => {
+  selectedCert.value = cert
+  expiryForm.expires_at = toDateInputValue(cert.expires_at)
+  expiryForm.clearErrors()
+  showExpiryModal.value = true
+}
+
+const submitExpiry = () => {
+  if (!selectedCert.value) return
+  expiryForm.patch(route('admin.certificates.update', selectedCert.value.id), {
+    preserveScroll: true,
+    onSuccess: () => { showExpiryModal.value = false; expiryForm.reset() }
+  })
 }
 
 const getStatusVariant = (status: string) => {
@@ -669,6 +696,17 @@ const getStatusVariant = (status: string) => {
                                 >
                                     Sign Final Audit
                                 </BaseButton>
+                                <BaseButton
+                                    v-else
+                                    @click="openExpiryModal(cert)"
+                                    size="sm"
+                                    variant="secondary"
+                                    outline
+                                    class="flex-1 min-w-[140px] min-h-[44px] justify-center rounded-lg"
+                                >
+                                    <PencilSquareIcon class="w-4 h-4 mr-1 text-slate-400" />
+                                    Edit Expiry
+                                </BaseButton>
                             </div>
                         </div>
                         <div v-if="instructor.certificates.length === 0" class="p-8 text-center">
@@ -728,6 +766,17 @@ const getStatusVariant = (status: string) => {
                                                 class="rounded-lg shadow-sm"
                                             >
                                                 Sign Final Audit
+                                            </BaseButton>
+                                            <BaseButton
+                                                v-else
+                                                @click="openExpiryModal(cert)"
+                                                size="sm"
+                                                variant="secondary"
+                                                outline
+                                                class="rounded-lg"
+                                            >
+                                                <PencilSquareIcon class="w-4 h-4 mr-1 text-slate-400" />
+                                                Edit Expiry
                                             </BaseButton>
                                         </div>
                                     </td>
@@ -1039,6 +1088,43 @@ const getStatusVariant = (status: string) => {
                     :loading="fineForm.processing"
                 >
                     {{ fineMode === 'paid' ? 'Confirm Paid' : 'Confirm Waiver' }}
+                </BaseButton>
+            </div>
+        </div>
+    </Modal>
+
+    <!-- Edit Certificate Expiry Modal -->
+    <Modal :show="showExpiryModal" @close="showExpiryModal = false">
+        <div class="p-6">
+            <h2 class="text-lg font-bold text-slate-900 mb-3">Edit Certificate Expiry</h2>
+            <p class="text-sm text-slate-600 mb-4">
+                Set the new expiry date for
+                <strong class="uppercase">{{ selectedCert?.type.replace('_', ' ') }}</strong>.
+                The expiry drives the 30-day reminder and whether this instructor appears in Find Instructor.
+            </p>
+            <div v-if="selectedCert?.status === 'expired'" class="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs font-semibold text-amber-900">
+                This certificate has already lapsed. Saving a future date restores it to Verified and makes the instructor bookable again.
+            </div>
+            <div class="mb-6">
+                <label class="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">
+                    New Expiry Date *
+                </label>
+                <input
+                    v-model="expiryForm.expires_at"
+                    type="date"
+                    class="w-full rounded-xl border-slate-200 shadow-sm focus:ring-ocean-500 focus:border-ocean-500 sm:text-sm p-3"
+                />
+                <p v-if="expiryForm.errors.expires_at" class="mt-1 text-xs font-bold text-rose-600">{{ expiryForm.errors.expires_at }}</p>
+            </div>
+            <div class="flex justify-end gap-3">
+                <BaseButton variant="secondary" @click="showExpiryModal = false">Cancel</BaseButton>
+                <BaseButton
+                    variant="primary"
+                    @click="submitExpiry"
+                    :disabled="!expiryForm.expires_at"
+                    :loading="expiryForm.processing"
+                >
+                    Save Expiry
                 </BaseButton>
             </div>
         </div>

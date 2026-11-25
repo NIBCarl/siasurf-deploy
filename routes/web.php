@@ -349,6 +349,7 @@ Route::middleware(['auth', 'verified', 'role:admin'])->prefix('admin')->as('admi
     Route::get('/certificates/{certificate}', [CertificateController::class, 'show'])->name('certificates.show');
     Route::post('/certificates/{certificate}/verify', [CertificateController::class, 'verify'])->name('certificates.verify');
     Route::post('/certificates/{certificate}/reject', [CertificateController::class, 'reject'])->name('certificates.reject');
+    Route::patch('/certificates/{certificate}/expiry', [CertificateController::class, 'update'])->name('certificates.update');
     Route::delete('/certificates/{certificate}', [CertificateController::class, 'destroy'])->name('certificates.destroy');
 
     // All bookings view
