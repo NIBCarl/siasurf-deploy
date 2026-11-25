@@ -868,19 +868,47 @@ class Booking extends Model
     }
 
     /**
+     * Cutoff timestamp for pre-lesson booking/response/payment actions:
+     * 1 hour before the scheduled lesson start.
+     */
+    public function bookingCutoffAt(): ?\Carbon\Carbon
+    {
+        $lessonStart = $this->lessonStartAt();
+
+        if (! $lessonStart) {
+            return null;
+        }
+
+        return $lessonStart->copy()->subHours(self::PRE_LESSON_BUFFER_HOURS);
+    }
+
+    /**
      * Latest moment a window may stay open: just before the lesson begins.
      */
     private function clampToLessonStart(\Carbon\Carbon $deadline): \Carbon\Carbon
     {
-        $lessonStart = $this->lessonStartAt();
+        $cutOff = $this->bookingCutoffAt();
 
-        if (!$lessonStart) {
+        if (! $cutOff) {
             return $deadline;
         }
 
-        $cutOff = $lessonStart->copy()->subHours(self::PRE_LESSON_BUFFER_HOURS);
-
         return $deadline->lessThan($cutOff) ? $deadline : $cutOff;
+    }
+
+    /**
+     * Whether a deadline was capped at the pre-lesson cutoff rather than
+     * receiving the full window.
+     */
+    public function isDeadlineClampedToCutoff(?\Carbon\Carbon $deadline): bool
+    {
+        $cutOff = $this->bookingCutoffAt();
+
+        if (! $deadline || ! $cutOff) {
+            return false;
+        }
+
+        return abs($deadline->diffInSeconds($cutOff, false)) <= 5;
     }
 
     /**

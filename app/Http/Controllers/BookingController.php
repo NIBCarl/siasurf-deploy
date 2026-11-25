@@ -691,11 +691,15 @@ class BookingController extends Controller
         }
 
         $booking->load(['instructor.instructorProfile', 'surfSpot']);
+        $cutoff = $booking->bookingCutoffAt();
 
         return Inertia::render('Booking/Payment', [
             'booking' => $booking,
             'step' => 3,
             'holdRemainingSeconds' => $booking->getPaymentTimeRemaining(),
+            'bookingCutoffAt' => $cutoff?->toIso8601String(),
+            'bookingCutoffLabel' => $cutoff?->format('g:i A'),
+            'isHoldClamped' => $booking->isDeadlineClampedToCutoff($booking->payment_deadline_at),
             'instructorSessionWarning' => $this->availabilityService->activeSessionNotice($booking->instructor ?? $booking->instructor_id),
         ]);
     }
@@ -850,9 +854,33 @@ class BookingController extends Controller
             return $this->finalizeInstantBook($booking);
         }
 
+        $acceptSuccessMessage = 'Booking request sent! Your instructor has '
+            . Booking::ACCEPT_WINDOW_HOURS . ' hours to accept.';
+
+        if ($booking->isDeadlineClampedToCutoff($booking->accept_deadline_at)) {
+            $cutoff = $booking->bookingCutoffAt();
+            $lessonStart = $booking->lessonStartAt();
+
+            if ($cutoff && $lessonStart) {
+                $remainingSeconds = max(0, (int) now()->diffInSeconds($booking->accept_deadline_at, false));
+                $totalMinutes = max(1, (int) ceil($remainingSeconds / 60));
+                $hours = intdiv($totalMinutes, 60);
+                $mins = $totalMinutes % 60;
+                $remainingLabel = $hours > 0
+                    ? ($mins > 0 ? "{$hours} hr {$mins} min" : "{$hours} hr")
+                    : "{$totalMinutes} min";
+
+                $acceptSuccessMessage = sprintf(
+                    'Booking request sent! Because your lesson starts at %s, your instructor has until %s (%s) to accept.',
+                    $lessonStart->format('g:i A'),
+                    $cutoff->format('g:i A'),
+                    $remainingLabel
+                );
+            }
+        }
+
         return redirect()->route('bookings.confirmation', $booking->id)
-            ->with('success', 'Booking request sent! Your instructor has '
-                . Booking::ACCEPT_WINDOW_HOURS . ' hours to accept.');
+            ->with('success', $acceptSuccessMessage);
     }
 
     /**
@@ -938,11 +966,17 @@ class BookingController extends Controller
         $booking->setAttribute('pending_reschedule_proposal', $booking->pendingRescheduleProposal()?->toProposalPayload());
         $booking->setAttribute('has_conversation', $booking->conversation !== null);
 
+        $cutoff = $booking->bookingCutoffAt();
+
         return Inertia::render('Booking/Confirmation', [
             'booking' => $booking,
             'step' => 4,
             'acceptRemainingSeconds' => $booking->getAcceptTimeRemaining(),
             'paymentRemainingSeconds' => $booking->getPaymentTimeRemaining(),
+            'bookingCutoffAt' => $cutoff?->toIso8601String(),
+            'bookingCutoffLabel' => $cutoff?->format('g:i A'),
+            'isAcceptWindowClamped' => $booking->isDeadlineClampedToCutoff($booking->accept_deadline_at),
+            'isPaymentWindowClamped' => $booking->isDeadlineClampedToCutoff($booking->payment_deadline_at),
             'slotShare' => $this->buildSlotSharePayload($booking),
             'instructorSessionWarning' => $booking->status === BookingStatus::Pending
                 ? $this->availabilityService->activeSessionNotice($booking->instructor ?? $booking->instructor_id)
@@ -1093,8 +1127,15 @@ class BookingController extends Controller
             'reviewed_at' => $latestChange->reviewed_at?->toIso8601String(),
         ] : null);
 
+        $cutoff = $booking->bookingCutoffAt();
+        $isPendingInstructor = ! $isReserved && $booking->status === BookingStatus::Pending;
+
         return Inertia::render('Student/Bookings/Show', [
             'booking' => $booking,
+            'acceptRemainingSeconds' => $isPendingInstructor ? $booking->getAcceptTimeRemaining() : 0,
+            'bookingCutoffLabel' => $cutoff?->format('g:i A'),
+            'isAcceptWindowClamped' => $isPendingInstructor && $booking->isDeadlineClampedToCutoff($booking->accept_deadline_at),
+            'isHoldClamped' => $isReserved && $booking->isDeadlineClampedToCutoff($booking->payment_deadline_at),
             'slotShare' => $this->buildSlotSharePayload($booking),
         ]);
     }

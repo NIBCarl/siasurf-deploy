@@ -59,6 +59,10 @@ interface Props {
   step?: number
   acceptRemainingSeconds?: number | null
   paymentRemainingSeconds?: number | null
+  bookingCutoffAt?: string | null
+  bookingCutoffLabel?: string | null
+  isAcceptWindowClamped?: boolean
+  isPaymentWindowClamped?: boolean
   slotShare?: SlotShare | null
   instructorSessionWarning?: InstructorSessionWarning | null
 }
@@ -163,6 +167,30 @@ const formatDate = (date: string) => {
   )
 }
 
+const clock = (value?: string | null) => {
+  if (!value) return null
+
+  const time = value.includes('T') ? value.split('T')[1] : value
+  const [hour, minute] = time.slice(0, 5).split(':').map(Number)
+
+  if (Number.isNaN(hour) || Number.isNaN(minute)) return null
+
+  const suffix = hour >= 12 ? 'PM' : 'AM'
+  const displayHour = hour % 12 === 0 ? 12 : hour % 12
+
+  return `${displayHour}:${String(minute).padStart(2, '0')} ${suffix}`
+}
+
+const scheduledSlot = computed(() => {
+  const start = clock(props.booking.start_time)
+  const end = clock(props.booking.end_time)
+
+  if (start && end) return `${start} – ${end}`
+  if (start) return start
+
+  return null
+})
+
 const pageTitle = computed(() => {
   if (isConfirmed.value) return 'Booking Confirmed!'
   if (isReceiptPendingVerification.value) return 'Receipt Submitted — Awaiting Verification'
@@ -213,7 +241,16 @@ const startGCashPayment = () => {
 
 const reloadBookingState = () => {
   router.reload({
-    only: ['booking', 'acceptRemainingSeconds', 'paymentRemainingSeconds', 'instructorSessionWarning'],
+    only: [
+      'booking',
+      'acceptRemainingSeconds',
+      'paymentRemainingSeconds',
+      'bookingCutoffAt',
+      'bookingCutoffLabel',
+      'isAcceptWindowClamped',
+      'isPaymentWindowClamped',
+      'instructorSessionWarning',
+    ],
   })
 }
 
@@ -308,6 +345,9 @@ onBeforeUnmount(() => {
               <div v-if="acceptSeconds > 0" class="shrink-0 bg-white rounded-2xl px-4 py-2.5 border border-amber-200 text-center">
                 <p class="text-[10px] font-bold uppercase tracking-wider text-amber-700">Response Window</p>
                 <p class="text-base font-mono font-black text-amber-950">{{ formatCountdown(acceptSeconds) }}</p>
+                <p v-if="isAcceptWindowClamped && bookingCutoffLabel" class="mt-0.5 text-[10px] font-semibold text-amber-800">
+                  Closes {{ bookingCutoffLabel }} · 1h before lesson
+                </p>
               </div>
             </div>
 
@@ -372,8 +412,13 @@ onBeforeUnmount(() => {
                 </div>
 
                 <div v-if="paymentSeconds > 0" class="bg-white rounded-2xl px-4 py-2.5 border border-ocean-200 text-center">
-                  <p class="text-[10px] font-bold uppercase tracking-wider text-ocean-700">15-Min Hold Remaining</p>
+                  <p class="text-[10px] font-bold uppercase tracking-wider text-ocean-700">
+                    {{ isPaymentWindowClamped && bookingCutoffLabel ? 'Payment Cutoff' : '15-Min Hold Remaining' }}
+                  </p>
                   <p class="text-lg font-mono font-black text-ocean-900">{{ formatCountdown(paymentSeconds) }}</p>
+                  <p v-if="isPaymentWindowClamped && bookingCutoffLabel" class="mt-0.5 text-[10px] font-semibold text-ocean-800">
+                    Closes {{ bookingCutoffLabel }} · 1h before lesson
+                  </p>
                 </div>
               </div>
 
@@ -523,7 +568,10 @@ onBeforeUnmount(() => {
               <p class="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1">Date &amp; Time</p>
               <p class="text-lg font-bold text-slate-900">
                 {{ formatDate(booking.date) }} <br />
-                <span class="text-ocean-600 text-sm capitalize">{{ booking.time_period }} Session</span>
+                <span v-if="scheduledSlot" class="text-ocean-600 text-sm">
+                  {{ scheduledSlot }} · <span class="capitalize">{{ booking.time_period }} Session</span>
+                </span>
+                <span v-else class="text-ocean-600 text-sm capitalize">{{ booking.time_period }} Session</span>
               </p>
               <p
                 v-if="booking.is_rescheduled || booking.rescheduled_by_instructor_at"

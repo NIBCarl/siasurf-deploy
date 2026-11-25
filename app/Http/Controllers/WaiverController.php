@@ -46,6 +46,8 @@ class WaiverController extends Controller
         }
 
         $booking->load(['student.studentProfile', 'instructor.instructorProfile', 'surfSpot', 'participants']);
+        $cutoffLabel = $booking->bookingCutoffAt()?->format('g:i A');
+        $isHoldClamped = $booking->isDeadlineClampedToCutoff($booking->payment_deadline_at);
 
         $waiverDocument = [
             'title' => config('waiver.title', 'SURF LESSON WAIVER, LIABILITY, AND INDEMNITY AGREEMENT'),
@@ -69,6 +71,8 @@ class WaiverController extends Controller
                 'waiverPrefill' => $this->buildWaiverPrefill($booking, $participant),
                 'waiverDocument' => $waiverDocument,
                 'holdRemainingSeconds' => $booking->getPaymentTimeRemaining(),
+                'bookingCutoffLabel' => $cutoffLabel,
+                'isHoldClamped' => $isHoldClamped,
                 'step' => 2,
             ]);
         }
@@ -91,6 +95,8 @@ class WaiverController extends Controller
             'waiverPrefill' => $this->buildWaiverPrefill($booking, null),
             'waiverDocument' => $waiverDocument,
             'holdRemainingSeconds' => $booking->getPaymentTimeRemaining(),
+            'bookingCutoffLabel' => $cutoffLabel,
+            'isHoldClamped' => $isHoldClamped,
             'step' => 2,
         ]);
     }
@@ -506,6 +512,8 @@ class WaiverController extends Controller
         }
 
         $booking->load(['instructor', 'surfSpot', 'participants']);
+        $cutoffLabel = $booking->bookingCutoffAt()?->format('g:i A');
+        $isHoldClamped = $booking->isDeadlineClampedToCutoff($booking->payment_deadline_at);
 
         if ($booking->participants->isNotEmpty()) {
             $participant = $this->waiverService->nextParticipantAwaitingParentalConsent($booking);
@@ -524,6 +532,8 @@ class WaiverController extends Controller
                 'participant' => $participant,
                 'progress' => $this->waiverService->waiverProgress($booking),
                 'holdRemainingSeconds' => $booking->getPaymentTimeRemaining(),
+                'bookingCutoffLabel' => $cutoffLabel,
+                'isHoldClamped' => $isHoldClamped,
                 'step' => 2,
             ]);
         }
@@ -547,6 +557,8 @@ class WaiverController extends Controller
             'participant' => null,
             'progress' => null,
             'holdRemainingSeconds' => $booking->getPaymentTimeRemaining(),
+            'bookingCutoffLabel' => $cutoffLabel,
+            'isHoldClamped' => $isHoldClamped,
             'step' => 2,
         ]);
     }

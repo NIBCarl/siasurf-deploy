@@ -150,12 +150,17 @@ interface Booking {
   }
   waiver?: { id: number; signed_at: string; type?: string } | null
   waivers?: Array<{ id: number; type: string; participant_name?: string | null; signed_by: string; signed_at: string }>
+  accept_deadline_at?: string | null
   payment_deadline_at?: string
   student_id: number
 }
 
 interface Props {
   booking: Booking
+  acceptRemainingSeconds?: number
+  bookingCutoffLabel?: string | null
+  isAcceptWindowClamped?: boolean
+  isHoldClamped?: boolean
   slotShare?: {
     max_seats: number
     remaining_seats: number
@@ -186,9 +191,17 @@ const isReserved = computed(
 )
 
 const holdDeadlineMs = ref(Date.now() + Math.max(0, props.booking.hold_remaining_seconds ?? 0) * 1000)
+const acceptDeadlineMs = ref(
+  props.booking.accept_deadline_at
+    ? new Date(props.booking.accept_deadline_at).getTime()
+    : Date.now() + Math.max(0, props.acceptRemainingSeconds ?? 0) * 1000,
+)
 const nowTick = ref(Date.now())
 const holdSeconds = computed(() =>
   Math.max(0, Math.floor((holdDeadlineMs.value - nowTick.value) / 1000)),
+)
+const acceptSeconds = computed(() =>
+  Math.max(0, Math.floor((acceptDeadlineMs.value - nowTick.value) / 1000)),
 )
 const paymentTimeRemaining = ref(0)
 const payingGCash = ref(false)
@@ -200,6 +213,16 @@ watch(
   () => props.booking.hold_remaining_seconds,
   (val) => {
     holdDeadlineMs.value = Date.now() + Math.max(0, val ?? 0) * 1000
+    nowTick.value = Date.now()
+  },
+)
+
+watch(
+  () => [props.booking.accept_deadline_at, props.acceptRemainingSeconds],
+  ([deadline, remaining]) => {
+    acceptDeadlineMs.value = typeof deadline === 'string' && deadline
+      ? new Date(deadline).getTime()
+      : Date.now() + Math.max(0, Number(remaining ?? 0)) * 1000
     nowTick.value = Date.now()
   },
 )
@@ -821,7 +844,11 @@ const canChat = computed(() =>
                         <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                             <div>
                                 <p class="text-label font-semibold uppercase tracking-[0.06em] text-amber-900">
-                                    15-Minute Reservation Hold
+                                    {{
+                                      isHoldClamped && bookingCutoffLabel
+                                        ? `Short-Notice Reservation Hold · Cutoff ${bookingCutoffLabel}`
+                                        : '15-Minute Reservation Hold'
+                                    }}
                                 </p>
                                 <h2 class="mt-1 text-title font-semibold text-amber-950">
                                     Finish your waiver &amp; payment selection
@@ -849,16 +876,30 @@ const canChat = computed(() =>
                         padding="md"
                         class="border-amber-200 bg-amber-50"
                     >
-                        <div class="flex items-start gap-3">
-                            <ClockIcon class="mt-0.5 h-5 w-5 shrink-0 text-amber-600" aria-hidden="true" />
-                            <div>
-                                <p class="text-label font-semibold uppercase tracking-[0.06em] text-amber-800">
-                                    Waiting for instructor confirmation
-                                </p>
-                                <p class="mt-1 text-body-sm text-amber-900">
-                                    {{ booking.instructor.name }} is reviewing your booking request. Your seat(s) are reserved, and the Pay button will appear right here automatically as soon as they confirm.
-                                </p>
+                        <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                            <div class="flex items-start gap-3">
+                                <ClockIcon class="mt-0.5 h-5 w-5 shrink-0 text-amber-600" aria-hidden="true" />
+                                <div>
+                                    <p class="text-label font-semibold uppercase tracking-[0.06em] text-amber-800">
+                                        Waiting for instructor confirmation
+                                    </p>
+                                    <p class="mt-1 text-body-sm text-amber-900">
+                                        {{ booking.instructor.name }} is reviewing your booking request. Your seat(s) are reserved, and the Pay button will appear right here automatically as soon as they confirm.
+                                    </p>
+                                    <p
+                                        v-if="isAcceptWindowClamped && bookingCutoffLabel"
+                                        class="mt-1 text-label font-semibold text-amber-900"
+                                    >
+                                        Closes {{ bookingCutoffLabel }} (1 hour before lesson start)
+                                    </p>
+                                </div>
                             </div>
+                            <Countdown
+                                v-if="acceptSeconds > 0"
+                                :seconds="acceptSeconds"
+                                label="Response window"
+                                class="shrink-0 self-start sm:self-center"
+                            />
                         </div>
                     </AppCard>
 

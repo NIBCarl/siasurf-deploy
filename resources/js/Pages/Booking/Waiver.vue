@@ -78,6 +78,8 @@ interface Props {
   participant?: Participant | null
   progress?: { participants: number; signed: number; required: number } | null
   holdRemainingSeconds?: number
+  bookingCutoffLabel?: string | null
+  isHoldClamped?: boolean
   step?: number
   waiverPrefill: WaiverPrefill
   waiverDocument: WaiverDocument
@@ -353,7 +355,14 @@ const goBack = () => {
           <div class="flex items-start sm:items-center gap-3 min-w-0">
             <span class="mt-1 sm:mt-0 flex h-2.5 w-2.5 shrink-0 rounded-full bg-emerald-500"></span>
             <p class="text-xs font-semibold text-emerald-900">
-              Seat(s) reserved for you! Your selected {{ (booking.student_count ?? 1) === 1 ? 'seat' : `${booking.student_count} seats` }} and time slot with {{ booking.instructor?.name || 'your instructor' }} are held for 15 minutes while you complete this waiver and payment step.
+              Seat(s) reserved for you! Your selected {{ (booking.student_count ?? 1) === 1 ? 'seat' : `${booking.student_count} seats` }} and time slot with {{ booking.instructor?.name || 'your instructor' }} are
+              <template v-if="isHoldClamped && bookingCutoffLabel">
+                held until <strong>{{ bookingCutoffLabel }}</strong> (1 hour before lesson start)
+              </template>
+              <template v-else>
+                held for 15 minutes
+              </template>
+              while you complete this waiver and payment step.
             </p>
           </div>
           <div class="flex flex-wrap items-center gap-x-3 gap-y-2 w-full sm:w-auto sm:shrink-0">

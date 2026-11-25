@@ -36,6 +36,9 @@ interface Props {
   booking: Booking
   step: number
   holdRemainingSeconds?: number
+  bookingCutoffAt?: string | null
+  bookingCutoffLabel?: string | null
+  isHoldClamped?: boolean
   instructorSessionWarning?: InstructorSessionWarning | null
 }
 
@@ -75,6 +78,22 @@ const formatHoldTimer = (seconds: number): string => {
   const mins = Math.floor(safe / 60)
   const secs = safe % 60
   return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`
+}
+
+const cutoffRemainingSeconds = computed<number | null>(() => {
+  if (!props.bookingCutoffAt) return null
+  const cutoffMs = new Date(props.bookingCutoffAt).getTime()
+  if (Number.isNaN(cutoffMs)) return null
+  return Math.max(0, Math.floor((cutoffMs - nowTick.value) / 1000))
+})
+
+const formatCutoffDuration = (seconds: number): string => {
+  const safe = Math.max(0, Math.floor(seconds))
+  if (safe < 60) return `${safe}s`
+  if (safe < 3600) return `${Math.ceil(safe / 60)} min`
+  const hrs = Math.floor(safe / 3600)
+  const mins = Math.floor((safe % 3600) / 60)
+  return mins > 0 ? `${hrs}h ${String(mins).padStart(2, '0')}m` : `${hrs}h`
 }
 
 const showRefundPolicyModal = ref(false)
@@ -176,7 +195,13 @@ const goBack = () => {
               class="inline-flex items-center rounded-lg px-2.5 py-1 text-xs font-bold tabular-nums"
               :class="isHoldExpired ? 'bg-rose-100 text-rose-900' : holdSeconds <= 180 ? 'bg-amber-100 text-amber-900' : 'bg-emerald-100 text-emerald-900'"
             >
-              {{ isHoldExpired ? 'Hold expired — release & rebook' : `Hold expires in ${formatHoldTimer(holdSeconds)}` }}
+              {{
+                isHoldExpired
+                  ? 'Hold expired — release & rebook'
+                  : isHoldClamped && bookingCutoffLabel
+                    ? `Hold expires in ${formatHoldTimer(holdSeconds)} (cutoff ${bookingCutoffLabel})`
+                    : `Hold expires in ${formatHoldTimer(holdSeconds)}`
+              }}
             </span>
             <button
               type="button"
@@ -276,7 +301,29 @@ const goBack = () => {
                 </label>
               </div>
 
-              <div class="mt-8 rounded-xl border border-slate-100 bg-slate-50 p-4 text-xs text-slate-600 leading-relaxed">
+              <div
+                v-if="cutoffRemainingSeconds !== null && cutoffRemainingSeconds > 0 && cutoffRemainingSeconds < 2 * 60 * 60 && bookingCutoffLabel"
+                role="status"
+                :class="[
+                  'mt-6 rounded-xl border p-4 text-xs leading-relaxed',
+                  cutoffRemainingSeconds < 30 * 60
+                    ? 'border-rose-300 bg-rose-50 text-rose-950'
+                    : 'border-amber-300 bg-amber-50 text-amber-950',
+                ]"
+              >
+                <template v-if="form.payment_method === 'gcash'">
+                  <strong>Short-notice cutoff at {{ bookingCutoffLabel }} ({{ formatCutoffDuration(cutoffRemainingSeconds) }} left):</strong>
+                  Both {{ booking.instructor?.name || 'your instructor' }}’s confirmation and your GCash payment must finish before
+                  <strong>{{ bookingCutoffLabel }}</strong> (1 hour before your lesson).
+                </template>
+                <template v-else>
+                  <strong>Short-notice cutoff at {{ bookingCutoffLabel }} ({{ formatCutoffDuration(cutoffRemainingSeconds) }} left):</strong>
+                  {{ booking.instructor?.name || 'Your instructor' }} must confirm your request before
+                  <strong>{{ bookingCutoffLabel }}</strong> (1 hour before your lesson). Once confirmed, you pay in cash at the beach.
+                </template>
+              </div>
+
+              <div class="mt-4 rounded-xl border border-slate-100 bg-slate-50 p-4 text-xs text-slate-600 leading-relaxed">
                 <template v-if="form.payment_method === 'gcash'">
                   <strong class="text-slate-900">How GCash payment works:</strong> Clicking below sends your request to {{ booking.instructor?.name || 'your instructor' }}. You won't be charged yet — as soon as they confirm your request, the <strong>Pay with GCash</strong> button will unlock automatically on the next screen.
                 </template>

@@ -585,4 +585,126 @@ class BookingFlowTest extends TestCase
                 ->where('autoAcceptBookings', true)
             );
     }
+
+    // ---- Short-notice / clamped cutoff helpers & UI props --------------
+
+    /** @test */
+    public function booking_cutoff_helpers_detect_clamped_and_unclamped_deadlines()
+    {
+        $tz = config('app.timezone', 'Asia/Manila');
+        $this->travelTo(\Carbon\Carbon::parse('2026-11-25 10:53:00', $tz));
+
+        $nearTerm = $this->booking([
+            'date' => '2026-11-25',
+            'time_period' => 'afternoon',
+            'start_time' => '12:00',
+            'end_time' => '14:00',
+        ]);
+
+        $cutoff = $nearTerm->bookingCutoffAt();
+        $this->assertNotNull($cutoff);
+        $this->assertSame('2026-11-25 11:00', $cutoff->format('Y-m-d H:i'));
+
+        $clampedAccept = $nearTerm->acceptDeadlineFrom();
+        $this->assertSame('2026-11-25 11:00', $clampedAccept->format('Y-m-d H:i'));
+        $this->assertTrue($nearTerm->isDeadlineClampedToCutoff($clampedAccept));
+
+        $distant = $this->booking([
+            'date' => '2026-11-30',
+            'time_period' => 'morning',
+            'start_time' => '08:00',
+            'end_time' => '10:00',
+        ]);
+
+        $fullAccept = $distant->acceptDeadlineFrom();
+        $this->assertFalse($distant->isDeadlineClampedToCutoff($fullAccept));
+        $this->assertFalse($distant->isDeadlineClampedToCutoff(null));
+    }
+
+    /** @test */
+    public function store_payment_on_a_short_notice_booking_succeeds_and_flashes_cutoff_message()
+    {
+        $tz = config('app.timezone', 'Asia/Manila');
+        $this->travelTo(\Carbon\Carbon::parse('2026-11-25 10:53:00', $tz));
+
+        $booking = $this->booking([
+            'status' => BookingStatus::Pending,
+            'date' => '2026-11-25',
+            'time_period' => 'afternoon',
+            'start_time' => '12:00',
+            'end_time' => '14:00',
+            'payment_deadline_at' => null,
+        ]);
+        $this->signLiability($booking);
+
+        $response = $this->actingAs($this->student)
+            ->post(route('bookings.store-payment', $booking->id), ['payment_method' => 'gcash']);
+
+        $response->assertRedirect(route('bookings.confirmation', $booking->id));
+        $response->assertSessionHas('success', function (string $message): bool {
+            return str_contains($message, '11:00 AM')
+                && str_contains($message, '12:00 PM')
+                && str_contains($message, '7 min')
+                && ! str_contains($message, '2 hours');
+        });
+
+        $booking->refresh();
+        $this->assertSame(BookingStatus::Pending, $booking->status);
+        $this->assertSame('2026-11-25 11:00', $booking->accept_deadline_at?->format('Y-m-d H:i'));
+    }
+
+    /** @test */
+    public function confirmation_and_student_show_pages_expose_clamped_cutoff_metadata()
+    {
+        $tz = config('app.timezone', 'Asia/Manila');
+        $this->travelTo(\Carbon\Carbon::parse('2026-11-25 10:53:00', $tz));
+
+        $clamped = $this->booking([
+            'status' => BookingStatus::Pending,
+            'date' => '2026-11-25',
+            'time_period' => 'afternoon',
+            'start_time' => '12:00',
+            'end_time' => '14:00',
+            'payment_deadline_at' => null,
+            'accept_deadline_at' => \Carbon\Carbon::parse('2026-11-25 11:00:00', $tz),
+        ]);
+
+        $this->actingAs($this->student)
+            ->get(route('bookings.confirmation', $clamped->id))
+            ->assertOk()
+            ->assertInertia(fn ($page) => $page
+                ->component('Booking/Confirmation')
+                ->where('bookingCutoffLabel', '11:00 AM')
+                ->where('isAcceptWindowClamped', true)
+            );
+
+        $this->actingAs($this->student)
+            ->get(route('student.bookings.show', $clamped->id))
+            ->assertOk()
+            ->assertInertia(fn ($page) => $page
+                ->component('Student/Bookings/Show')
+                ->where('bookingCutoffLabel', '11:00 AM')
+                ->where('isAcceptWindowClamped', true)
+                ->where('acceptRemainingSeconds', 420)
+            );
+
+        $distant = $this->booking([
+            'status' => BookingStatus::Pending,
+            'date' => '2026-11-30',
+            'time_period' => 'morning',
+            'start_time' => '08:00',
+            'end_time' => '10:00',
+            'payment_deadline_at' => null,
+            'accept_deadline_at' => \Carbon\Carbon::parse('2026-11-25 12:53:00', $tz),
+        ]);
+
+        $this->actingAs($this->student)
+            ->get(route('bookings.confirmation', $distant->id))
+            ->assertOk()
+            ->assertInertia(fn ($page) => $page
+                ->component('Booking/Confirmation')
+                ->where('bookingCutoffLabel', '7:00 AM')
+                ->where('isAcceptWindowClamped', false)
+            );
+    }
 }

@@ -1,13 +1,14 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { Head, useForm, Link } from '@inertiajs/vue3'
 import axios from 'axios'
 import AppSidebarLayout from '@/Layouts/AppSidebarLayout.vue'
 import BookingStepper from '@/Components/Molecules/BookingStepper.vue'
 import AppButton from '@/Components/UI/AppButton.vue'
 import Badge from '@/Components/Atoms/Badge.vue'
+import Modal from '@/Components/Modal.vue'
 import { resolveAvatarUrl } from '@/utils/avatar'
-import { calculatePhilippineAge, getPhilippineMaxBirthday } from '@/utils/philippineTime'
+import { calculatePhilippineAge, formatPhilippineTime, getPhilippineMaxBirthday } from '@/utils/philippineTime'
 import TextInput from '@/Components/TextInput.vue'
 import AvailabilityCalendar from '@/Components/UI/AvailabilityCalendar.vue'
 import SurfZoneMap, { type SurfZoneSpot } from '@/Components/Organisms/SurfZoneMap.vue'
@@ -25,6 +26,7 @@ interface Instructor {
     guiding_rate?: number | null
     coaching_rate?: number | null
     bio: string
+    auto_accept_bookings?: boolean
   }
 }
 
@@ -693,6 +695,86 @@ const flashErrorTitle = (message: string): string => {
   return 'Safety Requirement Not Met'
 }
 
+const nowMs = ref(Date.now())
+let cutoffTimer: ReturnType<typeof setInterval> | null = null
+
+const stopCutoffTimer = () => {
+  if (cutoffTimer) {
+    clearInterval(cutoffTimer)
+    cutoffTimer = null
+  }
+}
+
+watch(
+  () => Boolean(form.date && form.start_time),
+  (active) => {
+    stopCutoffTimer()
+    if (active) {
+      nowMs.value = Date.now()
+      cutoffTimer = setInterval(() => {
+        nowMs.value = Date.now()
+      }, 1000)
+    }
+  },
+  { immediate: true },
+)
+
+onUnmounted(() => {
+  stopCutoffTimer()
+})
+
+const formatWindowDuration = (seconds: number): string => {
+  const safe = Math.max(0, Math.floor(seconds))
+  if (safe < 60) {
+    return `${safe}s`
+  }
+  if (safe < 15 * 60) {
+    const mins = Math.floor(safe / 60)
+    const secs = safe % 60
+    return secs > 0 ? `${mins} min ${String(secs).padStart(2, '0')}s` : `${mins} min`
+  }
+  if (safe < 60 * 60) {
+    return `${Math.ceil(safe / 60)} min`
+  }
+  const hours = Math.floor(safe / 3600)
+  const mins = Math.floor((safe % 3600) / 60)
+  return mins > 0 ? `${hours}h ${String(mins).padStart(2, '0')}m` : `${hours}h`
+}
+
+const bookingWindowNotice = computed(() => {
+  if (!form.date || !form.start_time) return null
+
+  const lessonStartMs = new Date(`${form.date}T${form.start_time}:00+08:00`).getTime()
+  if (Number.isNaN(lessonStartMs)) return null
+
+  const cutoffMs = lessonStartMs - 60 * 60 * 1000
+  const remainingSeconds = Math.floor((cutoffMs - nowMs.value) / 1000)
+  if (remainingSeconds <= 0) return null
+
+  const isInstantBook = Boolean(props.instructor.instructor_profile?.auto_accept_bookings)
+  const isVeryTight = remainingSeconds < 30 * 60
+  const isShortened = isInstantBook ? isVeryTight : remainingSeconds < 2 * 60 * 60
+
+  if (!isShortened) return null
+
+  return {
+    isVeryTight,
+    isInstantBook,
+    remainingSeconds,
+    remainingLabel: formatWindowDuration(remainingSeconds),
+    cutoffLabel: formatPhilippineTime(new Date(cutoffMs), { hour: 'numeric', minute: '2-digit' }),
+    lessonStartLabel: formatSlotLabel(form.start_time),
+  }
+})
+
+const showTightWindowModal = ref(false)
+const tightWindowConfirmed = ref(false)
+
+watch([() => form.date, () => form.start_time], () => {
+  tightWindowConfirmed.value = false
+  showTightWindowModal.value = false
+})
+
 const canSubmit = computed(() => !(
   form.processing ||
   !form.date ||
@@ -708,6 +790,11 @@ const canSubmit = computed(() => !(
 
 const submit = () => {
   if (childSafetyViolation.value) {
+    return
+  }
+
+  if (bookingWindowNotice.value?.isVeryTight && !tightWindowConfirmed.value) {
+    showTightWindowModal.value = true
     return
   }
 
@@ -731,6 +818,12 @@ const submit = () => {
       },
     ],
   })).post(route('bookings.store-details', props.instructor.id))
+}
+
+const confirmTightWindowAndSubmit = () => {
+  tightWindowConfirmed.value = true
+  showTightWindowModal.value = false
+  submit()
 }
 </script>
 
@@ -996,6 +1089,70 @@ const submit = () => {
                     <p class="mt-1 text-xs text-slate-500">
                       Only times with an open seat for your skill level can be selected. Times already reserved or full are marked and unavailable.
                     </p>
+
+                    <!-- Short-notice / pre-lesson cutoff warning (non-blocking) -->
+                    <div
+                      v-if="bookingWindowNotice"
+                      role="status"
+                      :class="[
+                        'mt-3 rounded-xl border p-4 flex items-start gap-3',
+                        bookingWindowNotice.isVeryTight
+                          ? 'border-rose-300 bg-rose-50'
+                          : 'border-amber-300 bg-amber-50',
+                      ]"
+                    >
+                      <div
+                        :class="[
+                          'p-2 rounded-lg shrink-0',
+                          bookingWindowNotice.isVeryTight ? 'bg-rose-100' : 'bg-amber-100',
+                        ]"
+                      >
+                        <svg
+                          :class="[
+                            'w-5 h-5',
+                            bookingWindowNotice.isVeryTight ? 'text-rose-700' : 'text-amber-700',
+                          ]"
+                          fill="none"
+                          stroke="currentColor"
+                          viewBox="0 0 24 24"
+                        >
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                      </div>
+                      <div class="min-w-0">
+                        <template v-if="bookingWindowNotice.isVeryTight">
+                          <h4 class="text-sm font-bold text-rose-950">
+                            Very short processing time · {{ bookingWindowNotice.remainingLabel }} left before cutoff ({{ bookingWindowNotice.cutoffLabel }})
+                          </h4>
+                          <p class="mt-1 text-xs text-rose-900 leading-relaxed">
+                            Booking for this <strong>{{ bookingWindowNotice.lessonStartLabel }}</strong> slot closes at
+                            <strong>{{ bookingWindowNotice.cutoffLabel }}</strong> (1 hour before lesson start).
+                            <template v-if="bookingWindowNotice.isInstantBook">
+                              Your waiver and payment must both finish within <strong>{{ bookingWindowNotice.remainingLabel }}</strong>, or the booking will expire automatically.
+                            </template>
+                            <template v-else>
+                              Your waiver, {{ instructor.name }}’s confirmation, and GCash payment must all finish within
+                              <strong>{{ bookingWindowNotice.remainingLabel }}</strong>, or the request will expire automatically.
+                            </template>
+                          </p>
+                          <p class="mt-1 text-[11px] font-medium text-rose-800">
+                            Tip: Pick a later time slot if you want the full 2-hour approval window.
+                          </p>
+                        </template>
+                        <template v-else>
+                          <h4 class="text-sm font-bold text-amber-950">
+                            Short-notice booking · ~{{ bookingWindowNotice.remainingLabel }} approval window
+                          </h4>
+                          <p class="mt-1 text-xs text-amber-900 leading-relaxed">
+                            All bookings must be finalized at least <strong>1 hour before lesson start</strong> (by
+                            <strong>{{ bookingWindowNotice.cutoffLabel }}</strong> for your
+                            <strong>{{ bookingWindowNotice.lessonStartLabel }}</strong> session). Instead of the usual 2 hours,
+                            {{ instructor.name }} will have until <strong>{{ bookingWindowNotice.cutoffLabel }}</strong> to confirm. If they cannot respond in time, the request expires automatically.
+                          </p>
+                        </template>
+                      </div>
+                    </div>
+
                     <InputError class="mt-2" :message="form.errors.start_time" />
                   </div>
 
@@ -1708,6 +1865,61 @@ const submit = () => {
          </AppButton>
        </div>
      </div>
+
+     <!-- Tight Processing Window Confirmation Modal (non-blocking) -->
+     <Modal :show="showTightWindowModal" @close="showTightWindowModal = false" maxWidth="md">
+       <div class="p-6 space-y-4">
+         <div class="flex items-start gap-3">
+           <div class="rounded-xl bg-rose-100 p-2.5 shrink-0">
+             <svg class="h-6 w-6 text-rose-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+             </svg>
+           </div>
+           <div>
+             <h3 class="text-lg font-bold text-deep-950">
+               Only {{ bookingWindowNotice?.remainingLabel }} left before cutoff
+             </h3>
+             <p class="mt-1 text-xs font-semibold text-rose-700">
+               Cutoff: {{ bookingWindowNotice?.cutoffLabel }} (1 hour before your {{ bookingWindowNotice?.lessonStartLabel }} lesson)
+             </p>
+           </div>
+         </div>
+
+         <div class="rounded-xl border border-amber-200 bg-amber-50 p-4 text-xs text-amber-950 space-y-2 leading-relaxed">
+           <p>
+             All booking steps must finish before <strong>{{ bookingWindowNotice?.cutoffLabel }}</strong>:
+           </p>
+           <ul class="list-disc pl-4 space-y-1">
+             <li>Sign your liability waiver (and parental consent if applicable)</li>
+             <li v-if="!bookingWindowNotice?.isInstantBook">
+               Wait for <strong>{{ instructor.name }}</strong> to accept your request
+             </li>
+             <li>Complete GCash payment (if paying online; Cash on Hand confirms upon instructor acceptance)</li>
+           </ul>
+           <p class="pt-1 font-medium">
+             If time runs out before completion, the request expires automatically and your slot is released. You can still continue now.
+           </p>
+         </div>
+
+         <div class="flex flex-col-reverse sm:flex-row sm:justify-end gap-2.5 pt-2">
+           <AppButton
+             type="button"
+             variant="secondary"
+             @click="showTightWindowModal = false"
+           >
+             Choose Another Time
+           </AppButton>
+           <AppButton
+             type="button"
+             variant="primary"
+             :loading="form.processing"
+             @click="confirmTightWindowAndSubmit"
+           >
+             Continue Anyway &rarr;
+           </AppButton>
+         </div>
+       </div>
+     </Modal>
    </AppSidebarLayout>
 </template>
 
