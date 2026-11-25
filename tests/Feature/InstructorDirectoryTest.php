@@ -30,7 +30,7 @@ class InstructorDirectoryTest extends TestCase
         $this->instructor->instructorProfile()->create([
             'level' => InstructorLevel::Level2,
             'status' => 'active',
-            'rate_per_hour' => 1000,
+            'rate_per_hour' => 700,
             'area' => 'General Luna',
             'meeting_point' => 'Cloud 9 tower',
             'latitude' => 9.8119,
@@ -121,7 +121,7 @@ class InstructorDirectoryTest extends TestCase
             ->patch(route('instructor.profile.update'), [
                 'name' => $this->instructor->name,
                 'bio' => 'Updated bio',
-                'rate_per_hour' => 900,
+                'rate_per_hour' => 750,
                 'area' => 'Cloud 9',
                 'meeting_point' => 'Tower by the break',
                 'latitude' => 9.8089,

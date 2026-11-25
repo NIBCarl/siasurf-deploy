@@ -23,7 +23,7 @@ return [
 
     'pricing' => [
         'min_rate_per_hour' => env('SIASURF_MIN_RATE', 600),
-        'max_rate_per_hour' => env('SIASURF_MAX_RATE', 1000),
+        'max_rate_per_hour' => env('SIASURF_MAX_RATE', 800),
     ],
 
     /*
@@ -41,12 +41,12 @@ return [
     'services' => [
         'teaching' => [
             'min_rate' => (float) env('SIASURF_TEACHING_MIN_RATE', 600),
-            'max_rate' => (float) env('SIASURF_TEACHING_MAX_RATE', 1000),
+            'max_rate' => (float) env('SIASURF_TEACHING_MAX_RATE', 800),
             'default_rate' => (float) env('SIASURF_TEACHING_DEFAULT_RATE', 600),
         ],
         'guiding' => [
             'min_rate' => (float) env('SIASURF_GUIDING_MIN_RATE', 800),
-            'max_rate' => (float) env('SIASURF_GUIDING_MAX_RATE', 1500),
+            'max_rate' => (float) env('SIASURF_GUIDING_MAX_RATE', 1200),
             'default_rate' => (float) env('SIASURF_GUIDING_DEFAULT_RATE', 800),
         ],
         'coaching' => [
@@ -144,7 +144,7 @@ return [
     | Defaults follow the methodology:
     |   Level 1 -> 1 (beginners only, 1-on-1, slot held from the first request)
     |   Level 2 -> 2 (up to 2 students)
-    |   Level 3 -> 5 (group sessions up to 5 students)
+    |   Level 3 -> 3 (group sessions up to 3 students)
     |
     | Raise Level 2/3 here only if SISA changes the policy. SafetyService still
     | enforces the per-booking ceiling.

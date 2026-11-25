@@ -102,6 +102,43 @@ class UpdateSystemSettingsRequest extends FormRequest
                     );
                 }
 
+                // The three published bands must stay in ascending order, so the
+                // seeded defaults (Teaching <= Guiding <= Coaching) cannot be
+                // widened back into an overlap through the admin panel.
+                $bands = [];
+                foreach (['teaching', 'guiding', 'coaching'] as $service) {
+                    $min = $this->input("services.{$service}.min_rate");
+                    $max = $this->input("services.{$service}.max_rate");
+
+                    if (is_numeric($min) && is_numeric($max)) {
+                        $bands[$service] = ['min' => (float) $min, 'max' => (float) $max];
+                    }
+                }
+
+                if (isset($bands['teaching'], $bands['guiding'])
+                    && $bands['teaching']['max'] > $bands['guiding']['max']) {
+                    $validator->errors()->add(
+                        'services.guiding.max_rate',
+                        'The Guiding maximum must be at least the Teaching maximum.'
+                    );
+                }
+
+                if (isset($bands['guiding'], $bands['coaching'])
+                    && $bands['guiding']['max'] > $bands['coaching']['max']) {
+                    $validator->errors()->add(
+                        'services.coaching.max_rate',
+                        'The Coaching maximum must be at least the Guiding maximum.'
+                    );
+                }
+
+                if (isset($bands['teaching'], $bands['coaching'])
+                    && $bands['teaching']['min'] > $bands['coaching']['min']) {
+                    $validator->errors()->add(
+                        'services.coaching.min_rate',
+                        'The Coaching minimum must be at least the Teaching minimum.'
+                    );
+                }
+
                 $fullDays = $this->input('refunds.short_term_full_days');
                 $halfDays = $this->input('refunds.short_term_half_days');
                 if (is_numeric($fullDays) && is_numeric($halfDays) && (int) $fullDays <= (int) $halfDays) {

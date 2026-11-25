@@ -147,7 +147,7 @@ class ServiceBasedPricingAndCapacityTest extends TestCase
         $this->assertSame('695.50', $booking->total_amount); // 1 hour Surf Experience + 7% service fee
     }
 
-    public function test_instructor_can_edit_guiding_rate_within_800_to_1500_and_bookings_use_that_exact_rate(): void
+    public function test_instructor_can_edit_guiding_rate_within_800_to_1200_and_bookings_use_that_exact_rate(): void
     {
         $instructor = $this->createInstructor(InstructorLevel::Level2, [
             'rate_per_hour' => 700,
@@ -167,22 +167,22 @@ class ServiceBasedPricingAndCapacityTest extends TestCase
             ->patch(route('instructor.profile.update'), [
                 'name' => $instructor->name,
                 'rate_per_hour' => 700,
-                'guiding_rate' => 1600,
+                'guiding_rate' => 1300,
             ])
             ->assertSessionHasErrors('guiding_rate');
 
-        // Within-range guiding rate (₱1,250) becomes the instructor's final guiding rate.
+        // Within-range guiding rate (₱1,150) becomes the instructor's final guiding rate.
         $this->actingAs($instructor)
             ->patch(route('instructor.profile.update'), [
                 'name' => $instructor->name,
                 'rate_per_hour' => 700,
-                'guiding_rate' => 1250,
+                'guiding_rate' => 1150,
             ])
             ->assertSessionHasNoErrors();
 
-        $this->assertSame('1250.00', $instructor->instructorProfile->fresh()->guiding_rate);
+        $this->assertSame('1150.00', $instructor->instructorProfile->fresh()->guiding_rate);
 
-        // Intermediate student booking Guiding pays ₱1,250/hr × 2 hrs = ₱2,500.
+        // Intermediate student booking Guiding pays ₱1,150/hr × 2 hrs = ₱2,300.
         $student = $this->createStudent('intermediate');
         $this->actingAs($student)
             ->post(route('bookings.store-details', $instructor->id), $this->bookingPayload($this->intermediateSpot, [
@@ -194,10 +194,10 @@ class ServiceBasedPricingAndCapacityTest extends TestCase
 
         $booking = Booking::firstOrFail();
         $this->assertSame(SessionType::Guiding, $booking->session_type);
-        $this->assertSame('1250.00', $booking->hourly_rate);
-        $this->assertSame('2500.00', $booking->lesson_price);
-        $this->assertSame('175.00', $booking->service_fee_amount);
-        $this->assertSame('2675.00', $booking->total_amount);
+        $this->assertSame('1150.00', $booking->hourly_rate);
+        $this->assertSame('2300.00', $booking->lesson_price);
+        $this->assertSame('161.00', $booking->service_fee_amount);
+        $this->assertSame('2461.00', $booking->total_amount);
     }
 
     public function test_level_3_instructor_can_edit_coaching_rate_within_1500_to_2000_only(): void

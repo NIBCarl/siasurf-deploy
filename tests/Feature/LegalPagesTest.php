@@ -41,7 +41,7 @@ class LegalPagesTest extends TestCase
                 ->has('legal.effective_date')
                 ->where('rules.service_fee_percent', 7)
                 ->where('rules.teaching_min', 600)
-                ->where('rules.teaching_max', 1000)
+                ->where('rules.teaching_max', 800)
                 ->where('rules.strike_fine_amount', 500));
     }
 
