@@ -79,7 +79,7 @@ class DashboardController extends Controller
                 $weatherResponse = Http::timeout(5)->withOptions(['verify' => false])->get("https://api.open-meteo.com/v1/forecast", [
                     'latitude' => $lat,
                     'longitude' => $lng,
-                    'current' => 'temperature_2m,weather_code,wind_speed_10m,wind_direction_10m',
+                    'current' => 'temperature_2m,weather_code',
                     'timezone' => 'Asia/Manila'
                 ]);
                 
@@ -97,13 +97,11 @@ class DashboardController extends Controller
                     
                     $condition = $this->getWeatherDescription($weatherData['weather_code'] ?? 0);
                     $icon = ($weatherData['weather_code'] ?? 0) > 50 ? 'rain' : 'sun';
-                    $windDir = $this->getWindDirection($weatherData['wind_direction_10m'] ?? 0);
 
                     return [
                         'spot' => 'Cloud 9, Siargao',
                         'height' => isset($marineData['wave_height']) ? $marineData['wave_height'] . 'm' : 'Flat',
                         'condition' => $condition,
-                        'wind' => round($weatherData['wind_speed_10m'] ?? 0) . 'km/h ' . $windDir,
                         'temp' => round($weatherData['temperature_2m'] ?? 0) . '°C',
                         'icon' => $icon
                     ];
@@ -116,7 +114,6 @@ class DashboardController extends Controller
                 'spot' => 'Cloud 9, Siargao',
                 'height' => '—',
                 'condition' => 'Data Unavailable',
-                'wind' => '—',
                 'temp' => '—',
                 'icon' => 'wave'
             ];
@@ -148,14 +145,5 @@ class DashboardController extends Controller
             95 => 'Thunderstorm', 96 => 'Thunderstorm & hail'
         ];
         return $codes[$code] ?? 'Variable';
-    }
-
-    /**
-     * Convert wind degrees to cardinal direction
-     */
-    private function getWindDirection(float $degrees): string
-    {
-        $cardinals = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW', 'N'];
-        return $cardinals[round($degrees % 360 / 45)];
     }
 }

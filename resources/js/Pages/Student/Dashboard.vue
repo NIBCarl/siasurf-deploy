@@ -74,7 +74,6 @@ interface Props {
     spot: string
     height: string
     condition: string
-    wind: string
     tide: string
     temp: string
     icon: string
@@ -321,27 +320,9 @@ onUnmounted(() => {
                             </div>
 
                             <div class="surface-well mt-4 p-3">
-                                <div class="grid grid-cols-2 gap-3">
-                                    <div>
-                                        <p class="text-label font-semibold uppercase tracking-[0.06em] text-stone-500">Waves</p>
-                                        <p class="mt-1 text-body font-semibold text-deep-900">{{ surfReport.height }}</p>
-                                    </div>
-                                    <div>
-                                        <p class="text-label font-semibold uppercase tracking-[0.06em] text-stone-500">Wind</p>
-                                        <p class="mt-1 flex items-center gap-1.5 text-body font-semibold text-deep-900">
-                                            <svg
-                                                class="h-4 w-4 text-stone-500"
-                                                viewBox="0 0 24 24"
-                                                fill="none"
-                                                stroke="currentColor"
-                                                stroke-width="1.5"
-                                                aria-hidden="true"
-                                            >
-                                                <path stroke-linecap="round" d="M3 8h11a3 3 0 1 0-3-3M3 12h15a3 3 0 1 1-3 3M3 16h7" />
-                                            </svg>
-                                            {{ surfReport.wind }}
-                                        </p>
-                                    </div>
+                                <div>
+                                    <p class="text-label font-semibold uppercase tracking-[0.06em] text-stone-500">Waves</p>
+                                    <p class="mt-1 text-body font-semibold text-deep-900">{{ surfReport.height }}</p>
                                 </div>
 
                                 <div class="mt-3 border-t border-sand-200 pt-3">
