@@ -38,7 +38,6 @@ interface Booking {
     payment_method: string
     status: string
     checkout_url?: string | null
-    receipt_path?: string | null
   } | null
 }
 
@@ -119,9 +118,6 @@ watch(
 
 const isPendingInstructor = computed(() => props.booking.status === 'pending')
 const isAwaitingPayment = computed(() => props.booking.status === 'awaiting_payment')
-const isReceiptPendingVerification = computed(
-  () => isAwaitingPayment.value && props.booking.payment?.status === 'pending_verification',
-)
 const isConfirmed = computed(() =>
   ['confirmed', 'in_progress', 'completed'].includes(props.booking.status),
 )
@@ -195,7 +191,6 @@ const scheduledSlot = computed(() => {
 
 const pageTitle = computed(() => {
   if (isConfirmed.value) return 'Booking Confirmed!'
-  if (isReceiptPendingVerification.value) return 'Receipt Submitted — Awaiting Verification'
   if (isAwaitingPayment.value) return 'Instructor Approved! Complete Your Payment'
   if (isClosedOrDeclined.value) return 'Booking Update'
   return 'Waiting for Instructor Confirmation'
@@ -219,7 +214,6 @@ const bookingBadgeText = computed(() => {
     }
     return 'SLOT CONFIRMED • CASH UNPAID (PAY AT BEACH)'
   }
-  if (isReceiptPendingVerification.value) return 'VERIFYING RECEIPT'
   if (isAwaitingPayment.value) return 'APPROVED • AWAITING PAYMENT'
   if (props.booking.status === 'declined') return 'DECLINED BY INSTRUCTOR'
   if (isClosedOrDeclined.value) return props.booking.status.replace(/_/g, ' ').toUpperCase()
@@ -383,19 +377,9 @@ onBeforeUnmount(() => {
             </div>
           </div>
 
-          <template v-if="isReceiptPendingVerification">
-            <h1 class="text-4xl font-extrabold text-slate-900 mb-4 tracking-tight">
-              Receipt Submitted — Waiting for Verification
-            </h1>
-            <p class="text-lg text-slate-600 max-w-2xl mx-auto mb-8">
-              <strong>{{ booking.instructor.name }}</strong> approved your booking and received your GCash receipt. Once they verify it, this page will update to <strong>Booking Confirmed!</strong>
-            </p>
-          </template>
-
-          <template v-else>
-            <h1 class="text-4xl font-extrabold text-slate-900 mb-4 tracking-tight">
-              Instructor Confirmed! Complete Your Payment
-            </h1>
+          <h1 class="text-4xl font-extrabold text-slate-900 mb-4 tracking-tight">
+            Instructor Confirmed! Complete Your Payment
+          </h1>
             <p class="text-lg text-slate-600 max-w-2xl mx-auto mb-8">
               Great news! <strong>{{ booking.instructor.name }}</strong> accepted your surfing lesson for
               <strong>{{ formatDate(booking.date) }}</strong>. Complete your GCash payment below to finalize your booking.
@@ -434,15 +418,8 @@ onBeforeUnmount(() => {
                 >
                   Pay ₱{{ booking.total_amount.toLocaleString() }} with GCash Now &rarr;
                 </BaseButton>
-
-                <Link :href="route('payments.show', booking.id)" class="sm:w-auto">
-                  <BaseButton variant="secondary" size="lg" class="w-full justify-center">
-                    Upload GCash Receipt
-                  </BaseButton>
-                </Link>
               </div>
             </div>
-          </template>
         </template>
 
         <!-- =============================================================== -->
