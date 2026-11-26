@@ -471,9 +471,6 @@ const paymentSummarySentence = (booking: ScheduleBooking): string => {
   if (booking.payment_method === 'cash') {
     return 'Cash on hand (Collect at beach)'
   }
-  if (booking.payment_status === 'pending_verification') {
-    return 'GCash receipt uploaded — awaiting verification'
-  }
   return 'GCash payment pending'
 }
 

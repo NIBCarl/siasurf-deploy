@@ -98,7 +98,6 @@ interface Booking {
   cancelled_at?: string | null
   can_be_cancelled?: boolean
   has_submitted_payment?: boolean
-  has_pending_receipt_verification?: boolean
   has_pending_reschedule_response?: boolean
   is_group_reschedule?: boolean
   is_eligible_for_reschedule_decline_refund?: boolean
@@ -148,12 +147,6 @@ interface Booking {
     paid_at: string | null
     notes?: string
     checkout_url?: string | null
-    receipt_path?: string | null
-    receipt_reference?: string | null
-    receipt_uploaded_at?: string | null
-    receipt_verified_at?: string | null
-    receipt_note?: string | null
-    verified_by?: { name: string } | null
   }
   waiver?: { id: number; signed_at: string; type?: string } | null
   waivers?: Array<{ id: number; type: string; participant_name?: string | null; signed_by: string; signed_at: string }>
@@ -363,7 +356,6 @@ const paymentLabel = (status?: string) => {
   const labels: Record<string, string> = {
     pending: 'Payment pending',
     pending_cash: 'Cash unpaid (Pay at beach)',
-    pending_verification: 'Receipt awaiting verification',
     failed: 'Payment failed',
     refund_requested: 'Refund requested',
     refund_processing: 'Refund processing',
@@ -473,18 +465,6 @@ const sessionTypeLabel = computed(() => {
   if (!type) return null
   return type.charAt(0).toUpperCase() + type.slice(1)
 })
-
-// The receipt is served through an authorised route, never a public URL.
-const receiptUrl = computed(() =>
-  props.booking.payment?.receipt_path
-    ? route('payments.receipt.image', props.booking.id)
-    : null,
-)
-
-const pendingReceiptVerification = computed(
-  () => props.booking.has_pending_receipt_verification === true
-    || props.booking.payment?.status === 'pending_verification',
-)
 
 const pendingProposal = computed(() => props.booking.pending_reschedule_proposal ?? null)
 const proposalSecondsLeft = computed(() => {
@@ -973,7 +953,6 @@ const canChat = computed(() =>
                             <div class="flex flex-wrap items-center gap-3">
                                 <Countdown :seconds="paymentTimeRemaining" label="Time left" />
                                 <button
-                                    v-if="booking.payment?.status !== 'pending_verification'"
                                     type="button"
                                     :disabled="payingGCash"
                                     @click="startGCashCheckout"
@@ -982,12 +961,6 @@ const canChat = computed(() =>
                                     <CreditCardIcon class="mr-2 h-4 w-4" aria-hidden="true" />
                                     Pay ₱{{ formatAmount(booking.total_amount) }} with GCash
                                 </button>
-                                <Link
-                                    :href="route('payments.show', booking.id)"
-                                    class="inline-flex h-11 items-center rounded-control border border-amber-400 bg-white px-4 text-body font-semibold text-amber-950 shadow-sm transition-colors hover:bg-amber-50"
-                                >
-                                    {{ booking.payment?.status === 'pending_verification' ? 'View Uploaded Receipt' : 'Upload Receipt' }}
-                                </Link>
                             </div>
                         </div>
                     </AppCard>
@@ -1250,38 +1223,6 @@ const canChat = computed(() =>
                             </a>
                         </div>
 
-                        <!-- GCash receipt: private image, served through an authorised route -->
-                        <div v-if="receiptUrl" class="mt-4 rounded-card border border-sand-200 bg-sand-50 p-3">
-                            <p class="text-label font-semibold uppercase tracking-[0.06em] text-stone-500">
-                                GCash receipt
-                            </p>
-                            <a :href="receiptUrl" target="_blank" rel="noopener" class="mt-2 block">
-                                <img
-                                    :src="receiptUrl"
-                                    alt="GCash receipt"
-                                    class="h-40 w-full rounded-control object-contain bg-white ring-1 ring-sand-200"
-                                />
-                            </a>
-                            <p v-if="booking.payment?.receipt_reference" class="mt-2 text-label text-stone-600">
-                                Ref: <span class="font-mono">{{ booking.payment.receipt_reference }}</span>
-                            </p>
-                            <p v-if="booking.payment?.receipt_verified_at" class="mt-1 text-label text-lagoon-700">
-                                Verified {{ formatPhilippineDateTime(booking.payment.receipt_verified_at) }}
-                                <template v-if="booking.payment?.verified_by?.name">
-                                    by {{ booking.payment.verified_by.name }}
-                                </template>
-                            </p>
-                            <p
-                                v-else-if="booking.payment?.status === 'pending_verification'"
-                                class="mt-1 text-label text-amber-700"
-                            >
-                                Waiting for your instructor to verify this receipt.
-                            </p>
-                            <p v-if="booking.payment?.receipt_note" class="mt-1 text-label text-rose-700">
-                                Reviewer note: {{ booking.payment.receipt_note }}
-                            </p>
-                        </div>
-
                         <a
                             v-if="booking.status === 'awaiting_payment' && checkoutUrl"
                             :href="checkoutUrl"
@@ -1290,19 +1231,6 @@ const canChat = computed(() =>
                             <CreditCardIcon class="mr-2 h-4 w-4" aria-hidden="true" />
                             Complete payment
                         </a>
-
-                        <a
-                            v-else-if="booking.status === 'awaiting_payment' && !receiptUrl"
-                            :href="route('payments.show', booking.id)"
-                            class="mt-4 inline-flex h-11 items-center rounded-control bg-coral-700 px-4 text-body font-semibold text-white shadow-card transition-colors hover:bg-coral-800"
-                        >
-                            <CreditCardIcon class="mr-2 h-4 w-4" aria-hidden="true" />
-                            Upload GCash receipt
-                        </a>
-
-                        <p v-if="pendingReceiptVerification" class="mt-3 rounded-control bg-amber-50 px-3 py-2 text-label text-amber-800">
-                            Your GCash receipt is currently awaiting verification. Online cancellation unlocks once the receipt is verified or rejected.
-                        </p>
 
                         <!-- Refund Status Card (ENT-12) -->
                         <div

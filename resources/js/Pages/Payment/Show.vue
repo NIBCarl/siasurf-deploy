@@ -7,13 +7,12 @@
  * failed. It now mirrors the booking payment step and surfaces the GCash
  * checkout link the acceptance flow generates.
  */
-import { Head, Link, router, useForm } from '@inertiajs/vue3'
+import { Head, Link, router } from '@inertiajs/vue3'
 import { computed, ref } from 'vue'
 import AppSidebarLayout from '@/Layouts/AppSidebarLayout.vue'
 import BaseButton from '@/Components/Atoms/BaseButton.vue'
 import Badge from '@/Components/Atoms/Badge.vue'
 import { formatDate, formatDateTime } from '@/utils/date'
-import { formatPhilippineDateTime } from '@/utils/philippineTime'
 import {
   CreditCardIcon,
   BanknotesIcon,
@@ -21,7 +20,6 @@ import {
   ClockIcon,
   MapPinIcon,
   CheckCircleIcon,
-  PhotoIcon,
 } from '@heroicons/vue/24/outline'
 
 interface Props {
@@ -44,17 +42,8 @@ interface Props {
       paid_at?: string | null
       checkout_url?: string | null
       transaction_id?: string | null
-      receipt_path?: string | null
-      receipt_reference?: string | null
-      receipt_uploaded_at?: string | null
-      receipt_verified_at?: string | null
-      receipt_note?: string | null
-      verified_by?: { name: string } | null
     } | null
   }
-  canUploadReceipt?: boolean
-  receiptUrl?: string | null
-  maxReceiptMb?: number
 }
 
 const props = defineProps<Props>()
@@ -66,7 +55,6 @@ const isPaid = computed(
   () => payment.value?.status === 'completed' || props.booking.payment_status === 'completed',
 )
 const isCash = computed(() => payment.value?.payment_method === 'cash')
-const isAwaitingVerification = computed(() => payment.value?.status === 'pending_verification')
 const refundStatuses = new Set(['refund_requested', 'refund_processing', 'refunded'])
 const isRefundState = computed(
   () => refundStatuses.has(payment.value?.status ?? '') || refundStatuses.has(props.booking.payment_status ?? ''),
@@ -80,7 +68,6 @@ const isCancelledBooking = computed(() =>
 const isWaitingForInstructor = computed(() =>
   ['reserved', 'pending'].includes(props.booking.status ?? ''),
 )
-const receiptUrl = computed(() => props.receiptUrl ?? null)
 const paymentExpired = computed(() => {
   if (!props.booking.payment_deadline_at) return false
   return new Date(props.booking.payment_deadline_at).getTime() <= Date.now()
@@ -89,7 +76,6 @@ const canPayOnline = computed(
   () =>
     !isPaid.value &&
     !isCash.value &&
-    !isAwaitingVerification.value &&
     props.booking.status === 'awaiting_payment' &&
     !paymentExpired.value,
 )
@@ -98,30 +84,6 @@ const money = (value: number) =>
   new Intl.NumberFormat('en-PH', { style: 'currency', currency: 'PHP' }).format(value ?? 0)
 
 const statusLabel = computed(() => (payment.value?.status ?? 'pending').replace(/_/g, ' '))
-
-// GCash proof-of-payment upload.
-const receiptForm = useForm<{ receipt: File | null; reference: string }>({
-  receipt: null,
-  reference: '',
-})
-
-const onReceiptSelected = (event: Event) => {
-  const input = event.target as HTMLInputElement
-  receiptForm.receipt = input.files?.[0] ?? null
-}
-
-const uploadReceipt = () => {
-  if (!receiptForm.receipt) {
-    receiptForm.setError('receipt', 'Choose a screenshot of your GCash receipt first.')
-    return
-  }
-
-  receiptForm.post(route('payments.receipt.upload', props.booking.id), {
-    forceFormData: true,
-    preserveScroll: true,
-    onSuccess: () => receiptForm.reset(),
-  })
-}
 
 const startGCash = () => {
   if (processing.value) return
@@ -286,98 +248,6 @@ const startGCash = () => {
               <ClockIcon class="h-3.5 w-3.5" />
               Payment must complete before the hold expires.
             </p>
-          </div>
-        </div>
-
-        <!-- GCash receipt upload / preview -->
-        <div class="border-t border-slate-100 px-6 py-6">
-          <div class="flex items-start gap-3">
-            <PhotoIcon class="mt-0.5 h-6 w-6 text-teal-600" />
-            <div class="flex-1">
-              <p class="text-sm font-semibold text-slate-900">GCash receipt</p>
-              <p class="mt-1 text-xs leading-relaxed text-slate-500">
-                Already sent the money? Upload a screenshot of your GCash receipt so your
-                instructor can verify it and confirm the lesson.
-              </p>
-            </div>
-          </div>
-
-          <!-- Existing receipt (private image streamed through an authorised route) -->
-          <div v-if="receiptUrl" class="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-3">
-            <a :href="receiptUrl" target="_blank" rel="noopener" class="block">
-              <img
-                :src="receiptUrl"
-                alt="Uploaded GCash receipt"
-                class="mx-auto max-h-72 w-auto rounded-xl object-contain ring-1 ring-slate-200"
-              />
-            </a>
-
-            <p v-if="payment?.receipt_reference" class="mt-2 text-xs text-slate-600">
-              Reference: <span class="font-mono">{{ payment.receipt_reference }}</span>
-            </p>
-
-            <p v-if="payment?.receipt_verified_at" class="mt-1 text-xs font-semibold text-emerald-700">
-              Verified
-              {{ formatPhilippineDateTime(payment.receipt_verified_at) }}
-              <template v-if="payment?.verified_by?.name">by {{ payment.verified_by.name }}</template>
-            </p>
-
-            <p v-else-if="isAwaitingVerification" class="mt-1 text-xs font-semibold text-amber-700">
-              Waiting for your instructor to verify this receipt.
-            </p>
-
-            <p v-if="payment?.receipt_note" class="mt-1 text-xs text-rose-700">
-              Reviewer note: {{ payment.receipt_note }}
-            </p>
-          </div>
-
-          <div v-if="canUploadReceipt" class="mt-4 space-y-3">
-            <div>
-              <label for="gcash-receipt" class="block text-xs font-bold uppercase tracking-wider text-slate-400">
-                {{ receiptUrl ? 'Replace receipt' : 'Upload receipt' }}
-              </label>
-              <input
-                id="gcash-receipt"
-                type="file"
-                accept="image/jpeg,image/png,image/webp"
-                class="mt-1 block w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-base sm:text-sm text-slate-700 file:mr-3 file:rounded-lg file:border-0 file:bg-teal-50 file:px-3 file:py-1.5 file:text-xs file:font-bold file:text-teal-700"
-                @change="onReceiptSelected"
-              />
-              <p class="mt-1 text-xs text-slate-500">
-                JPG, PNG or WebP · up to {{ maxReceiptMb ?? 5 }} MB.
-              </p>
-              <p v-if="receiptForm.errors.receipt" class="mt-1 text-xs font-semibold text-rose-700">
-                {{ receiptForm.errors.receipt }}
-              </p>
-            </div>
-
-            <div>
-              <label for="gcash-reference" class="block text-xs font-bold uppercase tracking-wider text-slate-400">
-                GCash reference number (optional)
-              </label>
-              <input
-                id="gcash-reference"
-                v-model="receiptForm.reference"
-                type="text"
-                maxlength="100"
-                placeholder="e.g. 0123456789012"
-                class="mt-1 block w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-base sm:text-sm text-slate-700"
-              />
-              <p v-if="receiptForm.errors.reference" class="mt-1 text-xs font-semibold text-rose-700">
-                {{ receiptForm.errors.reference }}
-              </p>
-            </div>
-
-            <BaseButton
-              variant="primary"
-              size="lg"
-              class="w-full min-h-[48px] justify-center"
-              :loading="receiptForm.processing"
-              @click="uploadReceipt"
-            >
-              <PhotoIcon class="mr-2 h-5 w-5" />
-              Submit receipt for verification
-            </BaseButton>
           </div>
         </div>
       </div>

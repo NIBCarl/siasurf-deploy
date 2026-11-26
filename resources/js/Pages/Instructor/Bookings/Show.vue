@@ -84,12 +84,6 @@ interface Booking {
     paid_at: string
     notes?: string
     checkout_url?: string | null
-    receipt_path?: string | null
-    receipt_reference?: string | null
-    receipt_uploaded_at?: string | null
-    receipt_verified_at?: string | null
-    receipt_note?: string | null
-    verified_by?: { name: string } | null
   }
   waiver?: { signed_at: string }
   board_recommendation?: { volume_liters: number; length_range: string; type: string } | null
@@ -411,8 +405,6 @@ const paymentStatusLabel = computed(() => {
       return 'Pending'
     case 'pending_cash':
       return 'Cash unpaid (Collect at beach)'
-    case 'pending_verification':
-      return 'Receipt to verify'
     case 'failed':
       return 'Failed'
     case 'refund_requested':
@@ -435,7 +427,6 @@ const paymentTone = computed<'positive' | 'warning' | 'critical' | 'neutral'>(()
       return 'critical'
     case 'pending':
     case 'pending_cash':
-    case 'pending_verification':
       return 'warning'
     default:
       return 'neutral'
@@ -456,33 +447,6 @@ const paymentChipText = computed(() => {
   }
   return `${paymentStatusLabel.value} · ${formatMoney(totalAmount.value)}`
 })
-
-// ---- GCash receipt review ------------------------------------------------
-
-const receiptUrl = computed(() =>
-  props.booking.payment?.receipt_path
-    ? route('payments.receipt.image', props.booking.id)
-    : null,
-)
-
-const canVerifyReceipt = computed(() => props.booking.payment?.status === 'pending_verification')
-
-const showRejectReceiptModal = ref(false)
-const rejectReceiptForm = useForm({ note: '' })
-
-const verifyReceipt = () => {
-  router.post(route('payments.receipt.verify', props.booking.id), {}, { preserveScroll: true })
-}
-
-const submitRejectReceipt = () => {
-  rejectReceiptForm.post(route('payments.receipt.reject', props.booking.id), {
-    preserveScroll: true,
-    onSuccess: () => {
-      showRejectReceiptModal.value = false
-      rejectReceiptForm.reset()
-    },
-  })
-}
 
 // ---- Actions -------------------------------------------------------------
 
@@ -1752,57 +1716,6 @@ const showCompleteAction = computed(
                 </AppButton>
               </div>
 
-              <!-- GCash receipt review: full image + approve/reject -->
-              <div v-if="receiptUrl" class="rounded-control border border-sand-200 bg-white p-3">
-                <div class="flex items-center justify-between gap-2">
-                  <p class="text-label font-semibold uppercase tracking-[0.06em] text-stone-500">
-                    GCash receipt
-                  </p>
-                  <a
-                    :href="receiptUrl"
-                    target="_blank"
-                    rel="noopener"
-                    class="text-label font-semibold text-lagoon-700 underline underline-offset-2"
-                  >
-                    Open full image
-                  </a>
-                </div>
-
-                <a :href="receiptUrl" target="_blank" rel="noopener" class="mt-2 block">
-                  <img
-                    :src="receiptUrl"
-                    alt="GCash receipt uploaded by the student"
-                    class="h-48 w-full rounded-control object-contain ring-1 ring-sand-200"
-                  />
-                </a>
-
-                <p v-if="booking.payment?.receipt_reference" class="mt-2 text-label text-stone-600">
-                  Ref: <span class="font-mono">{{ booking.payment.receipt_reference }}</span>
-                </p>
-                <p v-if="booking.payment?.receipt_uploaded_at" class="mt-1 text-label text-stone-500">
-                  Uploaded {{ formatPhilippineDateTime(booking.payment.receipt_uploaded_at) }}
-                </p>
-                <p v-if="booking.payment?.receipt_note" class="mt-1 text-label text-rose-700">
-                  Previous note: {{ booking.payment.receipt_note }}
-                </p>
-
-                <div v-if="canVerifyReceipt" class="mt-3 flex flex-wrap gap-2">
-                  <AppButton variant="primary" size="sm" @click="verifyReceipt">
-                    Approve payment
-                  </AppButton>
-                  <AppButton
-                    variant="secondary"
-                    size="sm"
-                    @click="rejectReceiptForm.reset(); showRejectReceiptModal = true"
-                  >
-                    Reject receipt
-                  </AppButton>
-                </div>
-                <p v-else-if="booking.payment?.status === 'completed'" class="mt-2 text-label font-semibold text-lagoon-700">
-                  Receipt verified — payment settled.
-                </p>
-              </div>
-
               <div class="flex items-center justify-between gap-2 rounded-control border border-sand-200 bg-sand-50 px-3 py-2">
                 <span class="inline-flex min-w-0 items-center gap-2 text-body-sm text-deep-900">
                   <CheckBadgeIcon class="h-4 w-4 shrink-0 text-stone-500" aria-hidden="true" />
@@ -2148,41 +2061,6 @@ const showCompleteAction = computed(
             :other-party-name="booking.student.name"
             :other-party-avatar="booking.student.avatar_path"
           />
-        </div>
-      </Modal>
-
-      <!-- Reject a GCash receipt with a reason the student can act on -->
-      <Modal :show="showRejectReceiptModal" @close="showRejectReceiptModal = false" maxWidth="md">
-        <div class="p-6">
-          <h2 class="text-title font-semibold text-deep-950">Reject this receipt?</h2>
-          <p class="mt-1 text-body-sm text-stone-600">
-            {{ booking.student.name }} will get a fresh payment window to upload a corrected
-            screenshot. Please explain what is wrong with this one.
-          </p>
-
-          <label for="reject-receipt-note" class="mt-4 block text-label font-semibold uppercase tracking-[0.06em] text-stone-500">
-            Reason
-          </label>
-          <textarea
-            id="reject-receipt-note"
-            v-model="rejectReceiptForm.note"
-            rows="3"
-            maxlength="500"
-            placeholder="e.g. The amount does not match the booking total."
-            class="mt-2 w-full rounded-control border border-sand-200 bg-white px-3 py-2.5 text-body text-deep-900 focus:border-lagoon-600 focus:ring-lagoon-600"
-          ></textarea>
-          <p v-if="rejectReceiptForm.errors.note" class="mt-2 text-body-sm font-semibold text-rose-700">
-            {{ rejectReceiptForm.errors.note }}
-          </p>
-
-          <div class="mt-6 flex justify-end gap-2">
-            <AppButton variant="secondary" :disabled="rejectReceiptForm.processing" @click="showRejectReceiptModal = false">
-              Cancel
-            </AppButton>
-            <AppButton variant="danger" :loading="rejectReceiptForm.processing" @click="submitRejectReceipt">
-              Reject receipt
-            </AppButton>
-          </div>
         </div>
       </Modal>
 

@@ -150,7 +150,6 @@ const paymentLabel = (status?: string) => {
     underpaid: 'Underpaid (Balance owed)',
     pending: 'Payment pending',
     pending_cash: 'Cash unpaid (Pay at beach)',
-    pending_verification: 'Receipt awaiting verification',
     failed: 'Payment failed',
     refund_requested: 'Refund requested',
     refund_processing: 'Refund processing',
