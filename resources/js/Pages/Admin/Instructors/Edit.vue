@@ -25,8 +25,6 @@ interface Instructor {
     coaching_rate?: number | null
     area?: string | null
     meeting_point?: string | null
-    latitude?: number | string | null
-    longitude?: number | string | null
   }
 }
 
@@ -77,8 +75,6 @@ const form = useForm({
   status: props.instructor.instructor_profile.status,
   area: props.instructor.instructor_profile.area || '',
   meeting_point: props.instructor.instructor_profile.meeting_point || '',
-  latitude: props.instructor.instructor_profile.latitude ?? '',
-  longitude: props.instructor.instructor_profile.longitude ?? '',
 })
 
 const allowedServicesForLevel = computed(() => allowedForLevel(Number(form.level)))
@@ -350,22 +346,6 @@ const submit = () => {
                   <TextInput v-model="form.meeting_point" type="text" class="w-full" placeholder="Cloud 9 tower" />
                   <InputError :message="form.errors.meeting_point" />
                </div>
-
-               <div>
-                  <InputLabel value="Latitude" class="mb-2" />
-                  <TextInput v-model="form.latitude" type="number" step="0.0000001" class="w-full" placeholder="9.8000000" />
-                  <InputError :message="form.errors.latitude" />
-               </div>
-
-               <div>
-                  <InputLabel value="Longitude" class="mb-2" />
-                  <TextInput v-model="form.longitude" type="number" step="0.0000001" class="w-full" placeholder="126.1600000" />
-                  <InputError :message="form.errors.longitude" />
-               </div>
-
-               <p class="text-xs text-slate-500 md:col-span-2">
-                  Coordinates place the instructor on the public directory map. Leave both blank to sync automatically from their selected surf zones.
-               </p>
             </div>
          </div>
 
